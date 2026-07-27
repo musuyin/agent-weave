@@ -41,7 +41,6 @@ func TestConversation_CreateAndList(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 	assert.Equal(t, "my conv", created.Title)
 	assert.NotEmpty(t, created.ID)
-	assert.Equal(t, testUserID, created.UserID)
 
 	// List should return it.
 	w2 := httptest.NewRecorder()

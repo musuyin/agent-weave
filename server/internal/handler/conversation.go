@@ -21,7 +21,7 @@ type createConversationRequest struct {
 }
 
 func (h *ConversationHandler) List(c *gin.Context) {
-	convs, err := h.svc.List(c.Request.Context(), stubUserID)
+	convs, err := h.svc.List(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -36,7 +36,7 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 		return
 	}
 
-	conv, err := h.svc.Create(c.Request.Context(), stubUserID, req.Title)
+	conv, err := h.svc.Create(c.Request.Context(), req.Title)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

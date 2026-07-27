@@ -21,10 +21,9 @@ func init() {
 }
 
 // newTestDB opens an in-memory SQLite DB isolated per test and auto-migrates the schema.
-// The DSN uses a unique name per test so parallel tests don't share state.
+// _loc=UTC is required so go-sqlite3 parses stored time strings back into time.Time.
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	// Unique named in-memory DB per test; cache=shared keeps the connection alive.
 	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared&_loc=UTC"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
@@ -44,12 +43,10 @@ func newTestRegistry(t *testing.T) *agent.HubRegistry {
 	return agent.NewHubRegistry(log)
 }
 
-// seedConversation inserts a conversation belonging to StubUserID and returns its ID.
 func seedConversation(t *testing.T, db *gorm.DB, title string) string {
 	t.Helper()
 	conv := model.Conversation{
 		ID:        uuid.NewString(),
-		UserID:    testUserID,
 		Title:     title,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
@@ -60,7 +57,6 @@ func seedConversation(t *testing.T, db *gorm.DB, title string) string {
 	return conv.ID
 }
 
-// seedMessage inserts a message and returns it.
 func seedMessage(t *testing.T, db *gorm.DB, convID, role, text string) model.Message {
 	t.Helper()
 	msg := model.Message{
@@ -75,6 +71,3 @@ func seedMessage(t *testing.T, db *gorm.DB, convID, role, text string) model.Mes
 	}
 	return msg
 }
-
-// testUserID matches handler.StubUserID so test fixtures are owned by the stub user.
-const testUserID = "dev"

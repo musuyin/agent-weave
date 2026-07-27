@@ -28,7 +28,7 @@ type sendMessageRequest struct {
 
 func (h *MessageHandler) List(c *gin.Context) {
 	convID := c.Param("id")
-	if !h.requireConversationOwner(c, convID) {
+	if !h.requireConversation(c, convID) {
 		return
 	}
 
@@ -59,7 +59,7 @@ func (h *MessageHandler) List(c *gin.Context) {
 
 func (h *MessageHandler) Send(c *gin.Context) {
 	convID := c.Param("id")
-	if !h.requireConversationOwner(c, convID) {
+	if !h.requireConversation(c, convID) {
 		return
 	}
 
@@ -81,8 +81,8 @@ func (h *MessageHandler) Send(c *gin.Context) {
 	c.JSON(http.StatusAccepted, msg)
 }
 
-func (h *MessageHandler) requireConversationOwner(c *gin.Context, convID string) bool {
-	ok, err := h.svc.ConversationBelongsToUser(c.Request.Context(), convID, stubUserID)
+func (h *MessageHandler) requireConversation(c *gin.Context, convID string) bool {
+	ok, err := h.svc.ConversationExists(c.Request.Context(), convID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return false

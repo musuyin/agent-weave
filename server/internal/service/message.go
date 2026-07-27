@@ -22,11 +22,11 @@ func NewMessageService(db *gorm.DB) *MessageService {
 	return &MessageService{db: db}
 }
 
-// ConversationBelongsToUser returns true if the conversation exists and is owned by userID.
-func (s *MessageService) ConversationBelongsToUser(ctx context.Context, convID, userID string) (bool, error) {
+// ConversationExists returns true if the conversation exists.
+func (s *MessageService) ConversationExists(ctx context.Context, convID string) (bool, error) {
 	var count int64
 	err := s.db.WithContext(ctx).Model(&model.Conversation{}).
-		Where("id = ? AND user_id = ?", convID, userID).
+		Where("id = ?", convID).
 		Count(&count).Error
 	return count > 0, err
 }
