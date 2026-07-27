@@ -1,0 +1,19 @@
+llm_model:
+  anthropic:
+    api_key: ""
+    base_url: ""          # optional: override for local proxy; leave empty for default Anthropic endpoint
+    model: "claude-sonnet-4-6"
+
+database:
+  database_url: "mysql://root:password@tcp(localhost:3306)/agentweave"
+
+server:
+  port: "8080"
+
+# OIDC — fill in once IDP registration is complete (see docs/deferred.md)
+oidc:
+  oidc_provider_url: ""
+  oidc_client_id: ""
+  oidc_client_secret: ""
+  session_secret: ""
+  base_url: "http://localhost:8080"

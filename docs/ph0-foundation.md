@@ -31,26 +31,23 @@ server/
     db/                gorm setup, migration runner
     model/             Conversation, Message, Thread (GORM models)
     auth/              OIDC PKCE flow, session middleware
-    api/               Gin handlers (conversations, messages, SSE, auth)
+    handler/               Gin handlers (conversations, messages, SSE, auth)
     agent/             loop.go, sse.go
   db/migrations/       SQL files (golang-migrate)
 ```
 
 ## 0.3 Config (`internal/config/config.go`)
 
-Single `Config` struct loaded with `envconfig`:
+Use `config.yaml` to store all configs. Add `config.yaml` to `.gitignore`. Provide `config.yaml.example` with empty values as a template.
 
-| Env var | Purpose |
+| Key | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude API key |
-| `ANTHROPIC_MODEL` | Model ID (default: `claude-sonnet-4-6`) |
-| `DATABASE_URL` | MySQL DSN (`mysql://user:pass@tcp(host)/db`) |
-| `OIDC_PROVIDER_URL` | Company IDP |
-| `OIDC_CLIENT_ID` | PKCE client ID |
-| `OIDC_CLIENT_SECRET` | Client secret |
-| `SESSION_SECRET` | Cookie signing key (HMAC-SHA256) |
-| `BASE_URL` | Redirect base for OIDC callback |
-| `PORT` | HTTP port (default `8080`) |
+| `anthropic_api_key` | Claude API key |
+| `anthropic_model` | Model ID (default: `claude-sonnet-4-6`) |
+| `database_url` | MySQL DSN (`mysql://user:pass@tcp(host)/db`) |
+| `port` | HTTP port (default `8080`) |
+
+OIDC keys (`oidc_provider_url`, `oidc_client_id`, `oidc_client_secret`, `session_secret`, `base_url`) are defined in the struct but left empty — see `deferred.md`.
 
 ```go
 func Load() (*Config, error)
@@ -83,42 +80,13 @@ Migrations run automatically inside `ProvideDB` at server startup (no separate C
 
 All IDs are `VARCHAR(36)` UUIDs generated in Go (`github.com/google/uuid`). No `AutoIncrement`. No `AutoMigrate` calls — schema is managed entirely by golang-migrate.
 
-## 0.6 Auth (`internal/auth/`)
+## 0.6 Auth — DEFERRED
 
-**service.go** — `Service` struct:
-- `states map[string]PKCEState` protected by `sync.Mutex`
-- `PKCEState{CodeVerifier, ExpiresAt}`
-- `UserClaims{Sub, Email, Name}`
+OIDC auth is blocked on IDP registration. See `deferred.md`.
 
-Methods:
-```go
-func ProvideAuthService(ctx context.Context, cfg *config.Config) (*Service, error)
-    // calls oidc.NewProvider(ctx, cfg.OIDCProviderURL) — makes HTTP call to IDP
+**Current bypass**: all API routes have no authentication middleware. `GetCurrentUser` returns a hardcoded stub user `{Sub: "dev", Email: "dev@local", Name: "Dev"}` so downstream code that reads user identity still compiles and works.
 
-func (s *Service) StartOIDCFlow() (redirectURL string, err error)
-    // generate state+verifier, store in map, time.AfterFunc 10-min TTL, return IDP URL
-
-func (s *Service) CompleteOIDCCallback(ctx context.Context, state, code string) (*UserClaims, error)
-    // exchange code → id_token → verify → extract claims → delete state entry
-
-func (s *Service) SetSessionCookie(c *gin.Context, claims *UserClaims)
-    // hand-rolled: JSON-marshal claims → HMAC-SHA256(SESSION_SECRET) → base64url
-    // format: base64(json).base64(hmac); httponly + secure + SameSite=Lax
-
-func (s *Service) ClearSessionCookie(c *gin.Context)
-func (s *Service) ValidateSession(c *gin.Context) (*UserClaims, error)
-```
-
-**middleware.go**:
-```go
-func AuthMiddleware(svc *Service) gin.HandlerFunc
-func GetCurrentUser(c *gin.Context) (*UserClaims, bool)
-```
-
-Auth routes (no auth required):
-- `GET /auth/oidc/login` → redirect to IDP
-- `GET /auth/oidc/callback` → complete PKCE, set cookie, redirect to `/`
-- `POST /auth/logout` → clear cookie
+Add `AuthMiddleware` to the authenticated route group in `internal/handler/router.go` once OIDC credentials are available.
 
 ## 0.7 SSE Writer (`internal/agent/sse.go`)
 
