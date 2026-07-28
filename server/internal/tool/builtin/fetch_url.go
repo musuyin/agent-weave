@@ -16,14 +16,21 @@ func init() {
 	tool.Register(tool.ToolDef{
 		Name:        "fetch_url",
 		Description: "Fetch the content of a URL via HTTP GET and return it as a string. Result is truncated to 16 KB.",
-		InputSchema: struct {
-			URL string `json:"url" description:"The HTTP or HTTPS URL to fetch."`
-		}{},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"url": map[string]any{
+					"type":        "string",
+					"description": "The HTTP or HTTPS URL to fetch.",
+				},
+			},
+			"required": []string{"url"},
+		},
 		Handler: fetchURLHandler,
 	})
 }
 
-func fetchURLHandler(_ context.Context, params json.RawMessage) (string, error) {
+func fetchURLHandler(ctx context.Context, params json.RawMessage) (string, error) {
 	var input struct {
 		URL string `json:"url"`
 	}
@@ -36,7 +43,8 @@ func fetchURLHandler(_ context.Context, params json.RawMessage) (string, error) 
 		return "error: url must be http or https", nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// DESIGN-1 fix: use caller's context so the request is cancelled when the agent run is.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, input.URL, nil)
