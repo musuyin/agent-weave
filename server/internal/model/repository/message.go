@@ -8,10 +8,22 @@ import (
 )
 
 // ContentBlock is one element of a message's content array.
-// Type: "text" | "tool_use" | "tool_result" (Phase 1 will extend this).
+// Type is one of: "text", "tool_use", "tool_result".
 type ContentBlock struct {
 	Type string `json:"type"`
+
+	// text fields
 	Text string `json:"text,omitempty"`
+
+	// tool_use fields
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+
+	// tool_result fields
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content,omitempty"`
+	IsError   bool   `json:"is_error,omitempty"`
 }
 
 // ContentBlocks is a JSON-serialisable slice stored in messages.content.
