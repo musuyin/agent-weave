@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
 	"github/musuyin/agent-weave/internal/agent"
+	"github/musuyin/agent-weave/internal/model/dto"
 	"github/musuyin/agent-weave/internal/service"
+
+	"github.com/gin-gonic/gin"
 )
 
 type MessageHandler struct {
@@ -20,10 +21,6 @@ type MessageHandler struct {
 
 func NewMessageHandler(svc *service.MessageService, agentSvc *agent.Service, registry *agent.HubRegistry) *MessageHandler {
 	return &MessageHandler{svc: svc, agentSvc: agentSvc, registry: registry}
-}
-
-type sendMessageRequest struct {
-	Content string `json:"content" binding:"required"`
 }
 
 func (h *MessageHandler) List(c *gin.Context) {
@@ -63,7 +60,7 @@ func (h *MessageHandler) Send(c *gin.Context) {
 		return
 	}
 
-	var req sendMessageRequest
+	var req dto.SendMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

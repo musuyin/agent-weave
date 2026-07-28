@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github/musuyin/agent-weave/internal/model/dto"
 	"github/musuyin/agent-weave/internal/service"
 )
 
@@ -14,10 +15,6 @@ type ConversationHandler struct {
 
 func NewConversationHandler(svc *service.ConversationService) *ConversationHandler {
 	return &ConversationHandler{svc: svc}
-}
-
-type createConversationRequest struct {
-	Title string `json:"title"`
 }
 
 func (h *ConversationHandler) List(c *gin.Context) {
@@ -30,7 +27,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 }
 
 func (h *ConversationHandler) Create(c *gin.Context) {
-	var req createConversationRequest
+	var req dto.CreateConversationRequest
 	if err := c.ShouldBindJSON(&req); err != nil && err.Error() != "EOF" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

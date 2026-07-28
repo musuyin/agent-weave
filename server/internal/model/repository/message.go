@@ -1,4 +1,4 @@
-package model
+package repository
 
 import (
 	"database/sql/driver"
@@ -40,7 +40,7 @@ type Message struct {
 	ConversationID string        `gorm:"type:varchar(36);not null"`
 	Role           string        `gorm:"type:varchar(20);not null"` // "user" | "assistant"
 	Content        ContentBlocks `gorm:"type:json;not null"`
-	CreatedAt      time.Time     `gorm:"type:datetime(3);not null"`
+	CreatedAt      time.Time     `gorm:"not null;autoCreateTime:milli"`
 }
 
 func (Message) TableName() string { return "messages" }

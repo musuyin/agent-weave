@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -45,19 +44,18 @@ func ProvideDB(cfg *config.Config, log *slog.Logger) (*gorm.DB, func(), error) {
 }
 
 // mysqlDSN converts a "mysql://user:pass@tcp(host)/db" URL to a GORM DSN.
+// Always ensures parseTime=true and loc=UTC are present.
 func mysqlDSN(rawURL string) (string, error) {
 	dsn := strings.TrimPrefix(rawURL, "mysql://")
 	if dsn == rawURL {
 		return "", fmt.Errorf("database_url must start with mysql://")
 	}
-	// Append required params if not present.
-	if !strings.Contains(dsn, "?") {
+	if strings.Contains(dsn, "?") {
+		if !strings.Contains(dsn, "parseTime") {
+			dsn += "&parseTime=true&loc=UTC"
+		}
+	} else {
 		dsn += "?parseTime=true&charset=utf8mb4&loc=UTC"
 	}
 	return dsn, nil
-}
-
-// sqlDBFromGorm is a helper used by migrate.go.
-func sqlDBFromGorm(db *gorm.DB) (*sql.DB, error) {
-	return db.DB()
 }

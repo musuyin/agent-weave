@@ -8,14 +8,16 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github/musuyin/agent-weave/internal/agent"
+	"github/musuyin/agent-weave/internal/service"
 )
 
 type StreamHandler struct {
 	registry *agent.HubRegistry
+	msgSvc   *service.MessageService
 }
 
-func NewStreamHandler(registry *agent.HubRegistry) *StreamHandler {
-	return &StreamHandler{registry: registry}
+func NewStreamHandler(registry *agent.HubRegistry, msgSvc *service.MessageService) *StreamHandler {
+	return &StreamHandler{registry: registry, msgSvc: msgSvc}
 }
 
 // Stream opens a Server-Sent Events connection for the given conversation.
@@ -23,6 +25,16 @@ func NewStreamHandler(registry *agent.HubRegistry) *StreamHandler {
 // EventQueueDrained or client disconnect.
 func (h *StreamHandler) Stream(c *gin.Context) {
 	convID := c.Param("id")
+
+	ok, err := h.msgSvc.ConversationExists(c.Request.Context(), convID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "conversation not found"})
+		return
+	}
 
 	hub := h.registry.GetOrCreate(convID)
 
@@ -48,7 +60,6 @@ func (h *StreamHandler) Stream(c *gin.Context) {
 		}
 	})
 
-	// Ensure the hub is removed if the client disconnects before queue_drained.
 	h.registry.Delete(convID)
 }
 

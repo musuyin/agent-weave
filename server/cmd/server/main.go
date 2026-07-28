@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github/musuyin/agent-weave/internal/config"
 )
 
 func main() {
@@ -25,8 +27,15 @@ func main() {
 	}
 	defer cleanup()
 
+	cfg, err := config.ProvideConfig()
+	if err != nil {
+		log.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+	port := cfg.Server.Port
+
 	srv := &http.Server{
-		Addr:    ":" + getPort(),
+		Addr:    ":" + port,
 		Handler: router,
 	}
 
@@ -48,11 +57,4 @@ func main() {
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Error("shutdown error", "error", err)
 	}
-}
-
-func getPort() string {
-	if p := os.Getenv("PORT"); p != "" {
-		return p
-	}
-	return "8080"
 }

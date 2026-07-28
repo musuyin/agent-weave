@@ -1,4 +1,4 @@
-package model
+package repository
 
 import (
 	"database/sql/driver"
@@ -44,8 +44,8 @@ type Thread struct {
 	AgentID        string       `gorm:"type:varchar(255);not null"`
 	Status         ThreadStatus `gorm:"type:varchar(50);not null;default:pending"`
 	BlockedBy      StringSlice  `gorm:"type:json;not null"`
-	CreatedAt      time.Time    `gorm:"type:datetime(3);not null"`
-	UpdatedAt      time.Time    `gorm:"type:datetime(3);not null;autoUpdateTime:milli"`
+	CreatedAt      time.Time    `gorm:"not null;autoCreateTime:milli"`
+	UpdatedAt      time.Time    `gorm:"not null;autoUpdateTime:milli"`
 }
 
 func (Thread) TableName() string { return "threads" }

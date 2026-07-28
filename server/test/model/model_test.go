@@ -6,11 +6,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github/musuyin/agent-weave/internal/model"
+	"github/musuyin/agent-weave/internal/model/repository"
 )
 
 func TestContentBlocks_RoundTrip(t *testing.T) {
-	original := model.ContentBlocks{
+	original := repository.ContentBlocks{
 		{Type: "text", Text: "hello world"},
 		{Type: "text", Text: "second block"},
 	}
@@ -18,62 +18,62 @@ func TestContentBlocks_RoundTrip(t *testing.T) {
 	val, err := original.Value()
 	require.NoError(t, err)
 
-	var restored model.ContentBlocks
+	var restored repository.ContentBlocks
 	require.NoError(t, restored.Scan(val))
 	assert.Equal(t, original, restored)
 }
 
 func TestContentBlocks_ScanBytes(t *testing.T) {
 	raw := []byte(`[{"type":"text","text":"hi"}]`)
-	var cb model.ContentBlocks
+	var cb repository.ContentBlocks
 	require.NoError(t, cb.Scan(raw))
-	assert.Equal(t, model.ContentBlocks{{Type: "text", Text: "hi"}}, cb)
+	assert.Equal(t, repository.ContentBlocks{{Type: "text", Text: "hi"}}, cb)
 }
 
 func TestContentBlocks_ScanString(t *testing.T) {
 	raw := `[{"type":"text","text":"hi"}]`
-	var cb model.ContentBlocks
+	var cb repository.ContentBlocks
 	require.NoError(t, cb.Scan(raw))
-	assert.Equal(t, model.ContentBlocks{{Type: "text", Text: "hi"}}, cb)
+	assert.Equal(t, repository.ContentBlocks{{Type: "text", Text: "hi"}}, cb)
 }
 
 func TestContentBlocks_ScanUnsupportedType(t *testing.T) {
-	var cb model.ContentBlocks
+	var cb repository.ContentBlocks
 	assert.Error(t, cb.Scan(42))
 }
 
 func TestContentBlocks_Empty(t *testing.T) {
-	empty := model.ContentBlocks{}
+	empty := repository.ContentBlocks{}
 	val, err := empty.Value()
 	require.NoError(t, err)
 
-	var restored model.ContentBlocks
+	var restored repository.ContentBlocks
 	require.NoError(t, restored.Scan(val))
 	assert.Equal(t, empty, restored)
 }
 
 func TestStringSlice_RoundTrip(t *testing.T) {
-	original := model.StringSlice{"id-1", "id-2", "id-3"}
+	original := repository.StringSlice{"id-1", "id-2", "id-3"}
 
 	val, err := original.Value()
 	require.NoError(t, err)
 
-	var restored model.StringSlice
+	var restored repository.StringSlice
 	require.NoError(t, restored.Scan(val))
 	assert.Equal(t, original, restored)
 }
 
 func TestStringSlice_Empty(t *testing.T) {
-	empty := model.StringSlice{}
+	empty := repository.StringSlice{}
 	val, err := empty.Value()
 	require.NoError(t, err)
 
-	var restored model.StringSlice
+	var restored repository.StringSlice
 	require.NoError(t, restored.Scan(val))
 	assert.Equal(t, empty, restored)
 }
 
 func TestStringSlice_ScanUnsupportedType(t *testing.T) {
-	var s model.StringSlice
+	var s repository.StringSlice
 	assert.Error(t, s.Scan(42))
 }

@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github/musuyin/agent-weave/internal/config"
-	"github/musuyin/agent-weave/internal/model"
+	"github/musuyin/agent-weave/internal/model/repository"
 )
 
 const systemPromptLayer1 = `You are an AI assistant and orchestrator. You help the user with their tasks through thoughtful conversation.
@@ -125,10 +125,10 @@ func (s *Service) run(ctx context.Context, conversationID string, hub *Hub) erro
 	// Persist the completed assistant message.
 	// This is the "write message history" step — it comes AFTER all hooks fire in Phase 1+
 	// (invariant A: PRE_TOOL_USE hook → write history → execute tool).
-	var blocks model.ContentBlocks
+	var blocks repository.ContentBlocks
 	for _, cb := range accMsg.Content {
 		if cb.Type == "text" {
-			blocks = append(blocks, model.ContentBlock{Type: "text", Text: cb.Text})
+			blocks = append(blocks, repository.ContentBlock{Type: "text", Text: cb.Text})
 		}
 	}
 	if err := s.persistMessage(ctx, conversationID, "assistant", blocks); err != nil {
@@ -143,7 +143,7 @@ func (s *Service) run(ctx context.Context, conversationID string, hub *Hub) erro
 // loadHistory loads all messages for the conversation ordered (created_at ASC, id ASC)
 // and converts them to the Anthropic SDK message format.
 func (s *Service) loadHistory(ctx context.Context, conversationID string) ([]anthropic.MessageParam, error) {
-	var msgs []model.Message
+	var msgs []repository.Message
 	if err := s.db.WithContext(ctx).
 		Where("conversation_id = ?", conversationID).
 		Order("created_at ASC, id ASC").
@@ -173,8 +173,8 @@ func (s *Service) loadHistory(ctx context.Context, conversationID string) ([]ant
 }
 
 // persistMessage saves a message to DB with a generated UUID and current timestamp.
-func (s *Service) persistMessage(ctx context.Context, conversationID, role string, content model.ContentBlocks) error {
-	msg := model.Message{
+func (s *Service) persistMessage(ctx context.Context, conversationID, role string, content repository.ContentBlocks) error {
+	msg := repository.Message{
 		ID:             uuid.NewString(),
 		ConversationID: conversationID,
 		Role:           role,

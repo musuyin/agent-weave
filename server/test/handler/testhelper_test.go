@@ -13,7 +13,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github/musuyin/agent-weave/internal/agent"
-	"github/musuyin/agent-weave/internal/model"
+	"github/musuyin/agent-weave/internal/model/repository"
 )
 
 func init() {
@@ -31,7 +31,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.Conversation{}, &model.Message{}, &model.Thread{}); err != nil {
+	if err := db.AutoMigrate(&repository.Conversation{}, &repository.Message{}, &repository.Thread{}); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
 	return db
@@ -45,7 +45,7 @@ func newTestRegistry(t *testing.T) *agent.HubRegistry {
 
 func seedConversation(t *testing.T, db *gorm.DB, title string) string {
 	t.Helper()
-	conv := model.Conversation{
+	conv := repository.Conversation{
 		ID:        uuid.NewString(),
 		Title:     title,
 		CreatedAt: time.Now().UTC(),
@@ -57,13 +57,13 @@ func seedConversation(t *testing.T, db *gorm.DB, title string) string {
 	return conv.ID
 }
 
-func seedMessage(t *testing.T, db *gorm.DB, convID, role, text string) model.Message {
+func seedMessage(t *testing.T, db *gorm.DB, convID, role, text string) repository.Message {
 	t.Helper()
-	msg := model.Message{
+	msg := repository.Message{
 		ID:             uuid.NewString(),
 		ConversationID: convID,
 		Role:           role,
-		Content:        model.ContentBlocks{{Type: "text", Text: text}},
+		Content:        repository.ContentBlocks{{Type: "text", Text: text}},
 		CreatedAt:      time.Now().UTC(),
 	}
 	if err := db.Create(&msg).Error; err != nil {

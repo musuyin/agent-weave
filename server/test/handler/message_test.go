@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github/musuyin/agent-weave/internal/handler"
-	"github/musuyin/agent-weave/internal/model"
+	"github/musuyin/agent-weave/internal/model/repository"
 	"github/musuyin/agent-weave/internal/service"
 )
 
@@ -34,7 +34,7 @@ func TestMessage_ListEmpty(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/conversations",
 		strings.NewReader(`{"title":"t"}`)))
 	require.Equal(t, http.StatusCreated, w.Code)
-	var conv model.Conversation
+	var conv repository.Conversation
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &conv))
 
 	// List messages — should be empty.
@@ -42,7 +42,7 @@ func TestMessage_ListEmpty(t *testing.T) {
 	r.ServeHTTP(w2, httptest.NewRequest(http.MethodGet, "/api/conversations/"+conv.ID+"/messages", nil))
 	assert.Equal(t, http.StatusOK, w2.Code)
 
-	var msgs []model.Message
+	var msgs []repository.Message
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &msgs))
 	assert.Empty(t, msgs)
 }
@@ -55,11 +55,11 @@ func TestMessage_ListOrdering(t *testing.T) {
 	// Seed 3 messages with explicit well-separated timestamps.
 	texts := []string{"first", "second", "third"}
 	for i, text := range texts {
-		msg := model.Message{
+		msg := repository.Message{
 			ID:             "msg-order-" + text,
 			ConversationID: convID,
 			Role:           "user",
-			Content:        model.ContentBlocks{{Type: "text", Text: text}},
+			Content:        repository.ContentBlocks{{Type: "text", Text: text}},
 			CreatedAt:      now.Add(time.Duration(i) * time.Second),
 		}
 		require.NoError(t, db.Create(&msg).Error)
@@ -75,7 +75,7 @@ func TestMessage_ListOrdering(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/conversations/"+convID+"/messages", nil))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var msgs []model.Message
+	var msgs []repository.Message
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &msgs))
 	require.Len(t, msgs, 3)
 	assert.Equal(t, "first", msgs[0].Content[0].Text)
@@ -89,7 +89,7 @@ func TestMessage_ListKeysetCursor(t *testing.T) {
 	now := time.Now().UTC()
 
 	// Seed 5 messages with explicit, well-separated timestamps.
-	seeded := make([]model.Message, 5)
+	seeded := make([]repository.Message, 5)
 	for i := range seeded {
 		m := seedMessage(t, db, convID, "user", strings.Repeat("x", i+1))
 		// Override created_at so ordering is deterministic.
@@ -113,7 +113,7 @@ func TestMessage_ListKeysetCursor(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var got []model.Message
+	var got []repository.Message
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Len(t, got, 3)
 }

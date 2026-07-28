@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github/musuyin/agent-weave/internal/handler"
-	"github/musuyin/agent-weave/internal/model"
+	"github/musuyin/agent-weave/internal/model/repository"
 	"github/musuyin/agent-weave/internal/service"
 )
 
@@ -37,7 +37,7 @@ func TestConversation_CreateAndList(t *testing.T) {
 		strings.NewReader(`{"title":"my conv"}`)))
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	var created model.Conversation
+	var created repository.Conversation
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 	assert.Equal(t, "my conv", created.Title)
 	assert.NotEmpty(t, created.ID)
@@ -47,7 +47,7 @@ func TestConversation_CreateAndList(t *testing.T) {
 	r.ServeHTTP(w2, httptest.NewRequest(http.MethodGet, "/api/conversations", nil))
 	assert.Equal(t, http.StatusOK, w2.Code)
 
-	var list []model.Conversation
+	var list []repository.Conversation
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &list))
 	require.Len(t, list, 1)
 	assert.Equal(t, created.ID, list[0].ID)
@@ -61,7 +61,7 @@ func TestConversation_CreateDefaultTitle(t *testing.T) {
 		strings.NewReader(`{}`)))
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	var created model.Conversation
+	var created repository.Conversation
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 	assert.Equal(t, "New conversation", created.Title)
 }
@@ -81,7 +81,7 @@ func TestConversation_ListEmpty(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/conversations", nil))
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var list []model.Conversation
+	var list []repository.Conversation
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
 	assert.Empty(t, list)
 }
