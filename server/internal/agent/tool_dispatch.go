@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github/musuyin/agent-weave/internal/hook"
+	"github/musuyin/agent-weave/internal/mcp"
 	"github/musuyin/agent-weave/internal/model/repository"
 	"github/musuyin/agent-weave/internal/tool"
 )
@@ -21,7 +22,7 @@ func DispatchToolsForTest(
 	chain *hook.Chain,
 	assistantBlocks repository.ContentBlocks,
 ) error {
-	svc := &Service{db: db, chain: chain}
+	svc := &Service{db: db, chain: chain, mcpRouter: &mcp.Router{}}
 	return svc.dispatchToolsFromBlocks(ctx, conversationID, assistantBlocks)
 }
 
@@ -81,16 +82,20 @@ func (s *Service) dispatchToolsFromBlocks(ctx context.Context, conversationID st
 
 		if preErr != nil {
 			result = "tool call denied: " + preErr.Error()
-		} else {
-			def, ok := tool.Get(params.Name)
-			if !ok {
-				result = "unknown tool: " + params.Name
-			} else {
-				result, toolErr = def.Handler(ctx, params.Params)
-				if toolErr != nil {
-					result = "tool error: " + toolErr.Error()
-				}
+		} else if client, unprefixed, ok := s.mcpRouter.Route(params.Name); ok {
+			result, toolErr = client.CallTool(ctx, unprefixed, params.Params)
+			if toolErr != nil {
+				result = "tool error: " + toolErr.Error()
+				toolErr = nil
 			}
+		} else if def, ok := tool.Get(params.Name); ok {
+			result, toolErr = def.Handler(ctx, params.Params)
+			if toolErr != nil {
+				result = "tool error: " + toolErr.Error()
+				toolErr = nil
+			}
+		} else {
+			result = "unknown tool: " + params.Name
 		}
 
 		resultBlocks = append(resultBlocks, repository.ContentBlock{
@@ -117,22 +122,18 @@ func (s *Service) dispatchToolsFromBlocks(ctx context.Context, conversationID st
 	return nil
 }
 
-// buildToolParams converts registered tool definitions to the Anthropic SDK format.
-// InputSchema must be a map[string]any JSON Schema with "properties" and optional "required" keys.
-func buildToolParams() []anthropic.ToolUnionParam {
-	defs := tool.All()
-	params := make([]anthropic.ToolUnionParam, 0, len(defs))
-	for _, d := range defs {
-		schema, ok := d.InputSchema.(map[string]any)
-		if !ok {
-			continue
-		}
+// buildToolParams converts all tool definitions (builtin + MCP) to the Anthropic SDK format.
+func (s *Service) buildToolParams() []anthropic.ToolUnionParam {
+	allDefs := append(tool.All(), s.mcpRouter.AllTools()...)
+	params := make([]anthropic.ToolUnionParam, 0, len(allDefs))
+	for _, d := range allDefs {
+		props, req := mcp.SchemaFields(d.InputSchema)
 
 		inputSchema := anthropic.ToolInputSchemaParam{}
-		if props, ok := schema["properties"]; ok {
+		if props != nil {
 			inputSchema.Properties = props
 		}
-		if req, ok := schema["required"].([]string); ok {
+		if len(req) > 0 {
 			inputSchema.Required = req
 		}
 

@@ -14,6 +14,7 @@ import (
 	"github/musuyin/agent-weave/internal/db"
 	"github/musuyin/agent-weave/internal/handler"
 	"github/musuyin/agent-weave/internal/hook"
+	"github/musuyin/agent-weave/internal/mcp"
 	"github/musuyin/agent-weave/internal/service"
 )
 
@@ -26,6 +27,7 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		hook.ProvideSecurityHook,
 		hook.NewAuditHook,
 		hook.ProvideHookChain,
+		mcp.ProvideMCPRouter,
 		agent.ProvideAgentService,
 		service.NewConversationService,
 		service.NewMessageService,

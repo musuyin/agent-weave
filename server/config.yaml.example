@@ -10,6 +10,22 @@ database:
 server:
   port: "8080"
 
+# MCP servers — add one entry per server; empty list means builtin tools only
+mcp:
+  servers:
+    - name: "github-tools"
+      prefix: "github-tools"
+      transport: "http"
+      url: "https://mcp.github.tools.sap/mcp"
+      headers:
+        Authorization: "Bearer ghp_xxx"
+    - name: "github-wdf"
+      prefix: "github-wdf"
+      transport: "http"
+      url: "https://github-mcp.wdf.sap.corp/mcp"
+      headers:
+        Authorization: "Bearer ghp_yyy"
+
 # OIDC — fill in once IDP registration is complete (see docs/deferred.md)
 oidc:
   oidc_provider_url: ""

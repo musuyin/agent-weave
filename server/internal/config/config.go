@@ -12,6 +12,19 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Server   ServerConfig   `yaml:"server"`
 	OIDC     OIDCConfig     `yaml:"oidc"`
+	MCP      MCPConfig      `yaml:"mcp"`
+}
+
+type MCPConfig struct {
+	Servers []MCPServerConfig `yaml:"servers"`
+}
+
+type MCPServerConfig struct {
+	Name      string            `yaml:"name"`
+	Prefix    string            `yaml:"prefix"`
+	Transport string            `yaml:"transport"`
+	URL       string            `yaml:"url"`
+	Headers   map[string]string `yaml:"headers"`
 }
 
 type LLMModelConfig struct {

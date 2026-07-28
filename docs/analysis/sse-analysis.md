@@ -196,3 +196,107 @@ independently without a top-level type-switch.
 | Sending multiple events | `c.Stream` loop — each callback invocation = one SSE frame flushed immediately |
 | Stream termination | `EventQueueDrained` → handler returns `false`, response closes |
 | Client disconnect | `c.Request.Context().Done()` → handler returns `false` cleanly |
+
+---
+
+## 6. How the whole message is assembled and saved to the database
+
+### The two jobs are separate
+
+- **SSE events** stream tiny deltas to the frontend in real time.
+- **DB persistence** writes the fully assembled message once, after the stream is complete.
+
+The same agent loop (`agent/run.go`) does both — they share the same in-memory accumulator but write to different sinks at different times.
+
+### Step-by-step
+
+```
+Anthropic streaming API
+        │
+        │  ContentBlockStartEvent / ContentBlockDeltaEvent / ContentBlockStopEvent
+        ▼
+run.go:43  for stream.Next() {
+               event := stream.Current()
+               accMsg.Accumulate(event)   ← (1) accumulate in memory (Anthropic SDK)
+               hub.Push(...)              ← (2) stream delta to frontend via SSE
+           }
+        │
+        │  stream ends
+        ▼
+run.go:82  switch accMsg.StopReason {
+           case "end_turn":
+               blocks := extract(accMsg.Content)   ← (3) extract full blocks
+               persistMessage(ctx, convID, blocks) ← (4) single INSERT to DB
+               hub.Push(EventRoundDone)
+               hub.Push(EventQueueDrained)          ← (5) signal frontend: done
+           }
+```
+
+### (1) In-memory accumulation — `accMsg.Accumulate(event)` (`run.go:45`)
+
+`accMsg` is an `anthropic.Message{}` declared before the stream loop.
+The Anthropic SDK's `Accumulate()` method is called on every streaming event.
+Internally it builds up `accMsg.Content` — a slice of fully-formed `ContentBlock` objects —
+by appending text deltas into the right block as they arrive.
+
+By the time `stream.Next()` returns false, `accMsg.Content` holds the complete message exactly as
+the model intended it, with no gaps.
+
+### (2) SSE push — happens inside the same loop
+
+In parallel, `hub.Push(EventBlockDelta{...})` sends each individual delta to the frontend
+immediately. The frontend receives tokens one by one and can render them progressively.
+
+These two operations are independent: SSE sends raw deltas, the accumulator builds the whole.
+
+### (3 & 4) DB write — after the stream closes (`run.go:82–92`)
+
+```go
+case "end_turn":
+    var blocks repository.ContentBlocks
+    for _, cb := range accMsg.Content {
+        if cb.Type == "text" {
+            blocks = append(blocks, repository.ContentBlock{Type: "text", Text: cb.Text})
+        }
+    }
+    if err := s.persistMessage(ctx, conversationID, "assistant", blocks); err != nil {
+        return fmt.Errorf("persist: %w", err)
+    }
+```
+
+`repository.ContentBlocks` is `[]ContentBlock`, stored as a JSON array in the `messages.content`
+column. `persistMessage` calls a single `db.Create(&msg)` — one INSERT for the entire assembled
+message.
+
+This is why the DB shows the full message text even though the frontend received it in fragments.
+
+### Tool-use case
+
+When `StopReason == "tool_use"`, the flow is different:
+
+```
+accMsg contains text blocks + tool_use blocks
+        │
+tool_dispatch.go:67   persistMessage("assistant", assistantBlocks)  ← text + tool_use
+        │
+        │  execute tools
+        ▼
+tool_dispatch.go:112  persistMessage("user", resultBlocks)          ← tool results
+        │
+        └─ loop back → new API call with updated history
+```
+
+Two separate INSERTs per tool round, then the outer loop in `run.go` calls the API again with
+the full history (including tool results) until `end_turn`.
+
+### Summary table
+
+| Stage | Where | What |
+|---|---|---|
+| Delta arrives | `run.go:44` | Single token from Anthropic streaming API |
+| Accumulate | `run.go:45` `accMsg.Accumulate(event)` | SDK builds full `Message.Content` in memory |
+| Stream to frontend | `run.go:63–67` | `hub.Push(EventBlockDelta)` → SSE frame flushed immediately |
+| Stream ends | `run.go:78` | `stream.Next()` returns false |
+| Extract full blocks | `run.go:84–89` | Loop over `accMsg.Content` |
+| Write to DB | `run.go:90` | One `GORM Create()` → one INSERT with full JSON content |
+| Signal frontend | `run.go:93–94` | `EventRoundDone` + `EventQueueDrained` close the SSE stream |

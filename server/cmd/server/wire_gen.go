@@ -14,6 +14,7 @@ import (
 	"github/musuyin/agent-weave/internal/db"
 	"github/musuyin/agent-weave/internal/handler"
 	"github/musuyin/agent-weave/internal/hook"
+	"github/musuyin/agent-weave/internal/mcp"
 	"github/musuyin/agent-weave/internal/service"
 	"log/slog"
 )
@@ -37,11 +38,17 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 	securityHook := hook.ProvideSecurityHook()
 	auditHook := hook.NewAuditHook(log)
 	chain := hook.ProvideHookChain(securityHook, auditHook)
-	agentService := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, log)
+	router, cleanup2, err := mcp.ProvideMCPRouter(ctx, configConfig, log)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	agentService := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log)
 	messageHandler := handler.NewMessageHandler(messageService, agentService, hubRegistry)
 	streamHandler := handler.NewStreamHandler(hubRegistry, messageService)
 	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, log)
 	return engine, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }

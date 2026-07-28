@@ -34,7 +34,7 @@ func (s *Service) run(ctx context.Context, conversationID string, hub *Hub) erro
 				{Text: s.buildSystemPrompt()},
 			},
 			Messages: history,
-			Tools:    buildToolParams(),
+			Tools:    s.buildToolParams(),
 		})
 
 		blockIDs := map[int64]string{}
@@ -120,16 +120,16 @@ func (s *Service) run(ctx context.Context, conversationID string, hub *Hub) erro
 
 // buildSystemPrompt assembles the layered system prompt.
 // Layer 1: orchestrator instructions (from internal/prompts/orchestrator.md)
-// Layer 3: tool names + descriptions (dynamic, stays current with registered tools)
+// Layer 3: tool names + descriptions (builtin + MCP, stays current with registered tools)
 // Layers 2, 4-6: deferred to later phases
 func (s *Service) buildSystemPrompt() string {
 	var sb strings.Builder
 	sb.WriteString(prompts.Orchestrator)
 
-	defs := tool.All()
-	if len(defs) > 0 {
+	allDefs := append(tool.All(), s.mcpRouter.AllTools()...)
+	if len(allDefs) > 0 {
 		sb.WriteString("\n\n## Tool Reference\n")
-		for _, d := range defs {
+		for _, d := range allDefs {
 			sb.WriteString("\n- **")
 			sb.WriteString(d.Name)
 			sb.WriteString("**: ")
