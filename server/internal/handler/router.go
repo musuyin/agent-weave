@@ -12,6 +12,7 @@ func ProvideRouter(
 	convH *ConversationHandler,
 	msgH *MessageHandler,
 	streamH *StreamHandler,
+	reportH *ReportHandler,
 	log *slog.Logger,
 ) *gin.Engine {
 	r := gin.New()
@@ -27,6 +28,7 @@ func ProvideRouter(
 		api.GET("/conversations/:id/messages", msgH.List)
 		api.POST("/conversations/:id/messages", msgH.Send)
 		api.GET("/conversations/:id/stream", streamH.Stream)
+		api.POST("/reports/:type/run", reportH.Run)
 	}
 
 	return r

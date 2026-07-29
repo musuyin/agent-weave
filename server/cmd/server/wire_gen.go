@@ -46,7 +46,14 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 	agentService := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log)
 	messageHandler := handler.NewMessageHandler(messageService, agentService, hubRegistry)
 	streamHandler := handler.NewStreamHandler(hubRegistry, messageService)
-	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, log)
+	reportService, err := service.ProvideReportService(ctx, gormDB, conversationService)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	reportHandler := handler.NewReportHandler(reportService, messageService, agentService, hubRegistry)
+	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, log)
 	return engine, func() {
 		cleanup2()
 		cleanup()

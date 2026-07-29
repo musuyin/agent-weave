@@ -11,7 +11,7 @@
 Phase 0  基础骨架
 Phase 1  工具+Hook
 Phase 2  MCP 接入
-Phase 3  定时日报
+Phase 3  手动报告
 Phase 4  子 Agent 调度
 Phase 5  文件操作+审批
 Phase 6  命令驱动可视化
@@ -55,12 +55,12 @@ Phase 7  上下文压缩+长期记忆
 
 ---
 
-## Phase 3 — Scheduled Reports (定时日报)
+## Phase 3 — Manual Reports (手动报告)
 
-1. `robfig/cron/v3` scheduler started alongside HTTP server
-2. **Daily report** — cron `0 9 * * *`: query both GitHub for yesterday's commits/merged PRs, filter bots (`serviceuser` / `[bot]`), group by repo, write to fixed "daily-report" conversation
-3. **Weekly draft** — cron `0 17 * * 5`: own commits + closed Jira issues → copyable text
-4. **Sprint board** — pulled once at startup
+1. `POST /api/reports/:type/run` — triggers an on-demand report (`daily` | `weekly`)
+2. Handler creates/reuses a fixed conversation by well-known title, injects a fixed prompt, calls `agent.Service.Run`
+3. Agent uses GitHub MCP tools to fetch commits + PRs, filters bots, formats Markdown — streamed live over SSE
+4. No scheduler, no cron, no background jobs
 
 ---
 

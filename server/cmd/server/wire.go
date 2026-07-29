@@ -31,9 +31,11 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		agent.ProvideAgentService,
 		service.NewConversationService,
 		service.NewMessageService,
+		service.ProvideReportService,
 		handler.NewConversationHandler,
 		handler.NewMessageHandler,
 		handler.NewStreamHandler,
+		handler.NewReportHandler,
 		handler.ProvideRouter,
 	)
 	return nil, nil, nil

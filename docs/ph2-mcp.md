@@ -1,6 +1,7 @@
 # ph2 — MCP Integration (MCP 接入)
 
 **Goal**: Connect the agent to external MCP servers (two GitHub instances + Jira).
+**Status**: ✓ Core routing complete. Token management deferred (see §2.4).
 **Prerequisite**: ph1 complete (tool registry + hook chain).
 
 ---
@@ -11,7 +12,7 @@
 type Tool struct {
     Name        string
     Description string
-    InputSchema  json.RawMessage  // JSON Schema object
+    InputSchema json.RawMessage // JSON Schema object as returned by the MCP server
 }
 
 type Client interface {
@@ -21,128 +22,202 @@ type Client interface {
 }
 ```
 
-Three transport implementations (using `mark3labs/mcp-go`):
+One transport implementation exists today:
 
 | Transport | Constructor | Use case |
 |---|---|---|
-| stdio | `NewStdioClient(cmd string, args []string)` | Local MCP server process |
-| SSE | `NewSSEClient(url string, token string)` | Remote MCP over HTTP/SSE |
-| HTTP | `NewHTTPClient(url string, token string)` | Remote MCP over HTTP streamable |
+| HTTP streamable | `NewHTTPClient(ctx, url, headers, log)` | Remote MCP over HTTP (Streamable MCP protocol) |
 
-## 2.2 Tool Routing Table (`internal/mcp/router.go`)
+stdio and SSE transports are deferred — see `docs/deferred.md`.
 
-Built once at loop start — maps `prefixedToolName → Client`:
+SDK: `github.com/modelcontextprotocol/go-sdk v1.3.1` (`sdkmcp` import alias).
+
+## 2.2 HTTP Transport (`internal/mcp/http_client.go`)
+
+```go
+type HTTPClient struct {
+    session *sdkmcp.ClientSession
+    log     *slog.Logger
+}
+
+func NewHTTPClient(ctx context.Context, url string, headers map[string]string, log *slog.Logger) (*HTTPClient, error)
+```
+
+**Auth**: static headers injected via `headerTransport` (a custom `http.RoundTripper`). All headers from `config.yaml mcp.servers[*].headers` are added to every request. Typically `Authorization: Bearer <PAT>`.
+
+**`ListTools`**: calls `session.ListTools`, marshals each tool's `InputSchema` to `json.RawMessage`. Falls back to `{}` if marshal fails.
+
+**`CallTool`**:
+1. Unmarshals `params json.RawMessage` → `map[string]any`
+2. Calls `session.CallTool` with `CallToolParams{Name, Arguments}`
+3. Concatenates `*sdkmcp.TextContent` blocks; logs a `Warn` for any non-text block (image, embedded resource) that cannot be forwarded to the model
+4. Truncates result to `tool.MaxToolResultBytes` (16 KB)
+5. Checks `result.IsError` — returns `fmt.Errorf("mcp tool error: %s", text)` when true, so the agent loop marks the `tool_result` block as an error and `AuditHook` records it correctly
+
+**`Close`**: calls `session.Close()`.
+
+## 2.3 Tool Routing Table (`internal/mcp/router.go`)
+
+Built once at startup by `ProvideMCPRouter`. Maps `prefixedToolName → (Client, unprefixedName)`.
 
 ```go
 type Router struct {
-    routes map[string]Client  // prefixed tool name → MCP client
+    routes map[string]routeEntry   // prefixed name → {client, unprefixedName}
+    tools  []tool.ToolDef          // all MCP tools as ToolDef (Handler always nil)
     log    *slog.Logger
 }
 
-// Build enumerates all registered MCP servers, lists their tools,
-// applies name prefixes where configured, and populates routes.
-// Built-in tools (from ph1 registry) are NOT in this map.
-func Build(ctx context.Context, servers []ServerConfig, log *slog.Logger) (*Router, error)
+// ProvideMCPRouter is the Wire provider. Soft-fails per server — agent runs
+// with whatever servers are reachable; unreachable servers are logged and skipped.
+func ProvideMCPRouter(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Router, func(), error)
 
-// Route returns the client and unprefixed tool name for a prefixed tool name,
-// or (nil, "", false) if not an MCP tool.
+// Route returns the client and unprefixed name for a prefixed tool name.
 func (r *Router) Route(prefixedName string) (Client, string, bool)
 
 // AllTools returns all MCP tools as []tool.ToolDef for injection into the Anthropic SDK call.
+// Handler is nil on all returned ToolDefs — dispatch goes through Route(), not Handler.
 func (r *Router) AllTools() []tool.ToolDef
+
+// NewRouterForTest constructs a Router from a client and tool list, bypassing
+// config and network. Used by unit tests only.
+func NewRouterForTest(prefix string, client Client, tools []Tool) *Router
 ```
 
-Loop tool dispatch updated:
+**Startup sequence** (inside `ProvideMCPRouter`):
+1. For each `cfg.MCP.Servers` entry, skip if transport is not `"http"` (logs warn)
+2. `NewHTTPClient` — skip server on connect error (logs warn)
+3. `client.ListTools` — skip server on error, close the client (logs warn)
+4. For each tool: prepend `prefix + "__"` to the name (if prefix non-empty), store in `routes` and `tools`
+5. Return cleanup func that closes all connected clients
+
+**Tool dispatch** (in `internal/agent/tool_dispatch.go`):
 ```go
-if client, unprefixed, ok := mcpRouter.Route(toolName); ok {
-    result, err = client.CallTool(ctx, unprefixed, params)
+if preErr != nil {
+    result = "tool call denied: " + preErr.Error()
+} else if client, unprefixed, ok := s.mcpRouter.Route(params.Name); ok {
+    result, toolErr = client.CallTool(ctx, unprefixed, params.Params)
+    ...
+} else if def, ok := tool.Get(params.Name); ok {
+    result, toolErr = def.Handler(ctx, params.Params)
+    ...
 } else {
-    result, err = tool.Get(toolName).Handler(ctx, params)
+    result = "unknown tool: " + params.Name
 }
 ```
 
-## 2.3 Name-Prefix Deduplication
+Dispatch order: denied by pre-hook → MCP tool → builtin tool → unknown.
 
-Both GitHub MCP servers expose identically named tools (e.g. `search_commits`, `list_pull_requests`).
-Prefix assignment in `ServerConfig`:
+## 2.4 Name-Prefix Deduplication
+
+Both GitHub MCP servers expose identically named tools (e.g. `search_commits`, `list_pull_requests`). The `prefix` field in `MCPServerConfig` is prepended with `__` as a separator:
+
+```
+github-tools__search_commits
+github-wdf__search_commits
+```
+
+Configured in `config.yaml`:
+```yaml
+mcp:
+  servers:
+    - name: "github-tools"
+      prefix: "github-tools"
+      transport: "http"
+      url: "https://mcp.github.tools.sap/mcp"
+      headers:
+        Authorization: "Bearer ghp_xxx"
+    - name: "github-wdf"
+      prefix: "github-wdf"
+      transport: "http"
+      url: "https://github-mcp.wdf.sap.corp/mcp"
+      headers:
+        Authorization: "Bearer ghp_yyy"
+```
+
+If `prefix` is empty, the tool name is used as-is (no separator added).
+
+## 2.5 SchemaFields Helper (`internal/mcp/router.go`)
+
+MCP tool schemas arrive as `json.RawMessage`. Builtin tool schemas are `map[string]any`. `buildToolParams` needs to extract `properties` and `required` from both types:
 
 ```go
-type ServerConfig struct {
-    Name      string   // human label
-    Prefix    string   // prepended to all tool names, e.g. "github-tools-sap"
-    Transport string   // "stdio" | "sse" | "http"
-    // ...transport-specific fields
+func SchemaFields(schema any) (properties any, required []string)
+```
+
+Handles two input types:
+- `map[string]any` — used directly
+- `json.RawMessage` — unmarshalled into `map[string]any` first
+- anything else — returns `(nil, nil)`
+
+Extracts `m["properties"]` and casts `m["required"]` from `[]any` to `[]string`. Used in `buildToolParams` for both builtin and MCP tools.
+
+## 2.6 MCP OAuth Token Management — DEFERRED
+
+The spec called for a `TokenManager` with:
+- DB table `mcp_tokens` (unique on `user_id + server_id`)
+- `GetToken` with DB cache + auto-refresh
+- Client-credentials and OIDC refresh modes
+
+**Current state**: not implemented. Auth is a static `Authorization: Bearer <PAT>` header in `config.yaml`. See `docs/deferred.md` for details and workaround.
+
+## 2.7 Wire DI
+
+```go
+// wire.go
+mcp.ProvideMCPRouter,           // (ctx, *config.Config, *slog.Logger) → (*Router, func(), error)
+agent.ProvideAgentService,      // now accepts *mcp.Router
+```
+
+`wire_gen.go` wires cleanup2 (MCP client Close calls) into the app shutdown function.
+
+## 2.8 Config
+
+`internal/config/config.go`:
+```go
+type MCPConfig struct {
+    Servers []MCPServerConfig `yaml:"servers"`
+}
+
+type MCPServerConfig struct {
+    Name      string            `yaml:"name"`
+    Prefix    string            `yaml:"prefix"`
+    Transport string            `yaml:"transport"`  // only "http" supported
+    URL       string            `yaml:"url"`
+    Headers   map[string]string `yaml:"headers"`
 }
 ```
 
-Resulting tool names seen by the LLM:
-- `github-tools-sap__search_commits`
-- `github-wdf__search_commits`
-- `jira__search_issues`
+`Config.MCP MCPConfig` is the top-level field, populated from `config.yaml mcp:` key.
 
-The two GitHub instances:
-- `github.tools.sap` — prefix `github-tools-sap`, orgs: `hci`, `common-service-infrastructure`
-- `github.wdf.sap.corp` — prefix `github-wdf`, orgs: `DBaaS`, `hanadatalake`, `delphi`
+---
 
-## 2.4 MCP OAuth Token Management (`internal/mcp/token.go`)
+## Architecture Invariants
 
-DB table: `mcp_tokens` — unique constraint `(user_id, server_id)`, columns: `access_token`, `expires_at`.
+| # | Rule | Where enforced |
+|---|---|---|
+| Route-before-Handler | MCP tools have `Handler: nil` — always dispatch via `Router.Route()` | `router.go`, `tool_dispatch.go` |
+| Soft-fail at startup | Unreachable MCP servers are skipped with a warning; agent starts normally | `router.go:ProvideMCPRouter` |
+| IsError propagated | `CallTool` returns a Go error when `result.IsError == true` | `http_client.go:CallTool` |
+| Non-text content logged | Non-text MCP blocks are warned, never silently dropped | `http_client.go:CallTool` |
+| Truncation applied | MCP results truncated to 16 KB, same as builtin tools | `http_client.go:CallTool` |
 
-```go
-type TokenManager struct {
-    db  *gorm.DB
-    log *slog.Logger
-}
+---
 
-// GetToken returns a valid token for the given server.
-// Priority: DB cache (valid if expires_at > now+30s) → auto-refresh → error.
-func (m *TokenManager) GetToken(ctx context.Context, userID, serverID string) (string, error)
+## File List
 
-// StoreToken persists a new token (upsert on user_id+server_id).
-func (m *TokenManager) StoreToken(ctx context.Context, userID, serverID, token string, expiresAt time.Time) error
-```
+| File | Key exports |
+|---|---|
+| `internal/mcp/client.go` | `Tool`, `Client` interface |
+| `internal/mcp/http_client.go` | `HTTPClient`, `NewHTTPClient` |
+| `internal/mcp/router.go` | `Router`, `ProvideMCPRouter`, `Route`, `AllTools`, `NewRouterForTest`, `SchemaFields` |
 
-Two token refresh modes (configured per server):
+---
 
-**Client Credentials** (automatic):
-```go
-// RefreshClientCredentials exchanges client_id+secret for a new token and stores it.
-func (m *TokenManager) RefreshClientCredentials(ctx context.Context, serverID string, cfg OAuthConfig) error
-```
+## Tests
 
-**OIDC** (user re-auth required):
-- Return a structured error containing the authorization URL
-- Loop surfaces this as a `message_appended` SSE event prompting the user to re-authorize
-
-## 2.5 DB Migration
-
-New migration: `000004_create_mcp_tokens.up.sql`
-
-```sql
-CREATE TABLE mcp_tokens (
-    id          VARCHAR(36)  NOT NULL PRIMARY KEY,
-    user_id     VARCHAR(255) NOT NULL,
-    server_id   VARCHAR(255) NOT NULL,
-    access_token TEXT        NOT NULL,
-    expires_at  DATETIME(3)  NOT NULL,
-    created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    UNIQUE KEY uq_mcp_tokens_user_server (user_id, server_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-```
-
-## 2.6 Files to Create/Modify
-
-**New:**
-- `internal/mcp/client.go` — interface + transport implementations
-- `internal/mcp/router.go` — tool routing table
-- `internal/mcp/token.go` — token manager
-- `internal/mcp/stdio.go`, `sse.go`, `http.go` — transport implementations
-- `db/migrations/000004_create_mcp_tokens.{up,down}.sql`
-
-**Modified:**
-- `internal/agent/loop.go` — inject `*mcp.Router`, extend tool dispatch
-- `cmd/server/wire.go` + `wire_gen.go` — add MCP router + token manager providers
+| File | Coverage |
+|---|---|
+| `test/mcp/mcp_test.go` | `SchemaFields` (map, raw JSON, invalid, no-required, partial), `Router` (route hit/miss, AllTools names, nil Handler, no-prefix passthrough, empty config), CallTool roundtrip via fakeClient, schema preservation through AllTools |
 
 ---
 
@@ -150,8 +225,10 @@ CREATE TABLE mcp_tokens (
 
 ```bash
 go build ./...
+go test ./test/mcp/...
 
-# With a real MCP server running locally:
-# Confirm tool list includes prefixed GitHub tools
-# Send a message asking for recent commits → agent calls github-tools-sap__list_commits
+# With real MCP servers configured in config.yaml:
+# - Start server; logs should show "mcp: server connected" with tool count
+# - Send a message referencing a GitHub repo; agent should call github-tools__<tool>
+# - Confirm prefixed tool names appear in the Anthropic API call (check debug logs)
 ```
