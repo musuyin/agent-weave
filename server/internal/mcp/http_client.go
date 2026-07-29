@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -28,10 +29,11 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // HTTPClient connects to a single MCP server over HTTP streamable transport.
 type HTTPClient struct {
 	session *sdkmcp.ClientSession
+	log     *slog.Logger
 }
 
 // NewHTTPClient dials the MCP server at url, injects headers for auth, and completes the MCP handshake.
-func NewHTTPClient(ctx context.Context, url string, headers map[string]string) (*HTTPClient, error) {
+func NewHTTPClient(ctx context.Context, url string, headers map[string]string, log *slog.Logger) (*HTTPClient, error) {
 	httpClient := &http.Client{
 		Transport: &headerTransport{
 			base:    http.DefaultTransport,
@@ -50,7 +52,7 @@ func NewHTTPClient(ctx context.Context, url string, headers map[string]string) (
 	if err != nil {
 		return nil, fmt.Errorf("mcp connect %s: %w", url, err)
 	}
-	return &HTTPClient{session: session}, nil
+	return &HTTPClient{session: session, log: log}, nil
 }
 
 func (c *HTTPClient) ListTools(ctx context.Context) ([]Tool, error) {
@@ -90,12 +92,23 @@ func (c *HTTPClient) CallTool(ctx context.Context, name string, params json.RawM
 
 	var sb strings.Builder
 	for _, content := range result.Content {
-		if tc, ok := content.(*sdkmcp.TextContent); ok {
+		switch tc := content.(type) {
+		case *sdkmcp.TextContent:
 			sb.WriteString(tc.Text)
+		default:
+			// BUG-1 fix: non-text blocks (image, embedded resource) cannot be
+			// forwarded to the model as-is; log a warning so the operator knows.
+			c.log.Warn("mcp: skipping non-text content block", "tool", name, "type", fmt.Sprintf("%T", content))
 		}
 	}
-	text := sb.String()
-	return tool.Truncate(text, tool.MaxToolResultBytes), nil
+	text := tool.Truncate(sb.String(), tool.MaxToolResultBytes)
+
+	// BUG-2 fix: surface MCP tool-level errors so the agent marks them as
+	// error tool_results and AuditHook records them correctly.
+	if result.IsError {
+		return text, fmt.Errorf("mcp tool error: %s", text)
+	}
+	return text, nil
 }
 
 func (c *HTTPClient) Close() error {

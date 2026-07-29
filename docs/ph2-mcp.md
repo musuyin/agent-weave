@@ -44,8 +44,9 @@ type Router struct {
 // Built-in tools (from ph1 registry) are NOT in this map.
 func Build(ctx context.Context, servers []ServerConfig, log *slog.Logger) (*Router, error)
 
-// Route returns the MCPClient for a tool name, or (nil, false) if not an MCP tool.
-func (r *Router) Route(toolName string) (Client, bool)
+// Route returns the client and unprefixed tool name for a prefixed tool name,
+// or (nil, "", false) if not an MCP tool.
+func (r *Router) Route(prefixedName string) (Client, string, bool)
 
 // AllTools returns all MCP tools as []tool.ToolDef for injection into the Anthropic SDK call.
 func (r *Router) AllTools() []tool.ToolDef
@@ -53,8 +54,8 @@ func (r *Router) AllTools() []tool.ToolDef
 
 Loop tool dispatch updated:
 ```go
-if client, ok := mcpRouter.Route(toolName); ok {
-    result, err = client.CallTool(ctx, toolName, params)
+if client, unprefixed, ok := mcpRouter.Route(toolName); ok {
+    result, err = client.CallTool(ctx, unprefixed, params)
 } else {
     result, err = tool.Get(toolName).Handler(ctx, params)
 }

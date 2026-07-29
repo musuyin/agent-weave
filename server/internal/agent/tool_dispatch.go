@@ -83,10 +83,14 @@ func (s *Service) dispatchToolsFromBlocks(ctx context.Context, conversationID st
 		if preErr != nil {
 			result = "tool call denied: " + preErr.Error()
 		} else if client, unprefixed, ok := s.mcpRouter.Route(params.Name); ok {
+			s.log.Debug("mcp tool call", "prefixed", params.Name, "unprefixed", unprefixed)
 			result, toolErr = client.CallTool(ctx, unprefixed, params.Params)
 			if toolErr != nil {
+				s.log.Debug("mcp tool error", "prefixed", params.Name, "error", toolErr)
 				result = "tool error: " + toolErr.Error()
 				toolErr = nil
+			} else {
+				s.log.Debug("mcp tool ok", "prefixed", params.Name, "result_bytes", len(result))
 			}
 		} else if def, ok := tool.Get(params.Name); ok {
 			result, toolErr = def.Handler(ctx, params.Params)

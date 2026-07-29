@@ -41,7 +41,9 @@ These items are blocked on external dependencies or setup that is not yet availa
 
 **Blocked by**: Internal MCP server OAuth credentials.
 
-**What needs to be built when unblocked**: See `ph2-mcp.md` section 2.4.
+**Current workaround**: MCP servers are authenticated via a static `Authorization: Bearer <PAT>` header in `config.yaml` (`mcp.servers[*].headers`). This is sufficient for a single shared PAT but incompatible with per-user OAuth flows. When a PAT expires, update `config.yaml` and restart the server.
+
+**What needs to be built when unblocked**: See `ph2-mcp.md` section 2.4 — `TokenManager`, `mcp_tokens` DB table, per-server `OAuthConfig`, OIDC re-auth error surfaced as SSE event.
 
 ---
 

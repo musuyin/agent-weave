@@ -37,7 +37,7 @@ func ProvideMCPRouter(ctx context.Context, cfg *config.Config, log *slog.Logger)
 			log.Warn("mcp: unsupported transport, skipping", "server", srv.Name, "transport", srv.Transport)
 			continue
 		}
-		client, err := NewHTTPClient(ctx, srv.URL, srv.Headers)
+		client, err := NewHTTPClient(ctx, srv.URL, srv.Headers, log)
 		if err != nil {
 			log.Warn("mcp: failed to connect, skipping", "server", srv.Name, "error", err)
 			continue
@@ -59,7 +59,10 @@ func ProvideMCPRouter(ctx context.Context, cfg *config.Config, log *slog.Logger)
 				Name:        prefixed,
 				Description: t.Description,
 				InputSchema: t.InputSchema,
-				Handler:     nil, // dispatched via Route(), not Handler
+				// Handler is intentionally nil: MCP tools are dispatched via
+				// Router.Route() in dispatchToolsFromBlocks, never via Handler.
+				// Do not call Handler on these ToolDefs — it will panic.
+				Handler: nil,
 			})
 		}
 		log.Info("mcp: server connected", "server", srv.Name, "tools", len(mcpTools))
@@ -85,6 +88,29 @@ func (r *Router) Route(prefixedName string) (Client, string, bool) {
 // AllTools returns all MCP tools as ToolDef for injection into the Anthropic API.
 func (r *Router) AllTools() []tool.ToolDef {
 	return r.tools
+}
+
+// NewRouterForTest constructs a Router directly from a client and tool list,
+// bypassing config and network. Used by unit tests only.
+func NewRouterForTest(prefix string, client Client, tools []Tool) *Router {
+	r := &Router{
+		routes: make(map[string]routeEntry),
+		log:    slog.Default(),
+	}
+	for _, t := range tools {
+		prefixed := t.Name
+		if prefix != "" {
+			prefixed = prefix + "__" + t.Name
+		}
+		r.routes[prefixed] = routeEntry{client: client, unprefixedName: t.Name}
+		r.tools = append(r.tools, tool.ToolDef{
+			Name:        prefixed,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+			Handler:     nil,
+		})
+	}
+	return r
 }
 
 // schemaToToolInputSchemaFields extracts properties and required from an InputSchema
