@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github/musuyin/agent-weave/internal/model/repository"
-	"github/musuyin/agent-weave/internal/prompts"
+	"github/musuyin/agent-weave/internal/seeding"
 	"github/musuyin/agent-weave/internal/tool"
 	_ "github/musuyin/agent-weave/internal/tool/builtin"
 )
@@ -119,12 +119,12 @@ func (s *Service) run(ctx context.Context, conversationID string, hub *Hub) erro
 }
 
 // buildSystemPrompt assembles the layered system prompt.
-// Layer 1: orchestrator instructions (from internal/prompts/orchestrator.md)
+// Layer 1: orchestrator instructions (from internal/seeding/orchestrator.md)
 // Layer 3: tool names + descriptions (builtin + MCP, stays current with registered tools)
 // Layers 2, 4-6: deferred to later phases
 func (s *Service) buildSystemPrompt() string {
 	var sb strings.Builder
-	sb.WriteString(prompts.Orchestrator)
+	sb.WriteString(seeding.Orchestrator)
 
 	allDefs := append(tool.All(), s.mcpRouter.AllTools()...)
 	if len(allDefs) > 0 {
