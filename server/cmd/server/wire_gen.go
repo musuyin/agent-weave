@@ -53,7 +53,21 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		return nil, nil, err
 	}
 	reportHandler := handler.NewReportHandler(reportService, messageService, agentService, hubRegistry)
-	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, log)
+	skillService, err := service.ProvideSkillService(ctx, gormDB)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	skillHandler := handler.NewSkillHandler(skillService)
+	serviceAgentService, err := service.ProvideAgentService(ctx, gormDB)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	agentHandler := handler.NewAgentHandler(serviceAgentService)
+	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, skillHandler, agentHandler, log)
 	return engine, func() {
 		cleanup2()
 		cleanup()
