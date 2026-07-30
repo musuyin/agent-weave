@@ -51,6 +51,7 @@ type Message struct {
 	ID             string        `gorm:"type:varchar(36);primaryKey"`
 	ConversationID string        `gorm:"type:varchar(36);not null"`
 	Role           string        `gorm:"type:varchar(20);not null"` // "user" | "assistant"
+	AgentID        *string       `gorm:"type:varchar(36)"`          // producing agent; NULL = orchestrator
 	Content        ContentBlocks `gorm:"type:json;not null"`
 	CreatedAt      time.Time     `gorm:"not null;autoCreateTime:milli"`
 }

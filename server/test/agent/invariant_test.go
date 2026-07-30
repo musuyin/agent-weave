@@ -29,7 +29,7 @@ func newInvariantTestDB(t *testing.T) *gorm.DB {
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&repository.Conversation{}, &repository.Message{}, &repository.Thread{}))
+	require.NoError(t, db.AutoMigrate(&repository.Conversation{}, &repository.Message{}, &repository.Thread{}, &repository.Skill{}, &repository.Agent{}, &repository.AgentSkill{}, &repository.ConversationAgent{}))
 	return db
 }
 

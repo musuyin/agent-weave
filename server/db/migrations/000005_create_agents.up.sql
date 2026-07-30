@@ -1,0 +1,10 @@
+CREATE TABLE agents (
+    id          VARCHAR(36)   NOT NULL PRIMARY KEY,
+    name        VARCHAR(255)  NOT NULL,
+    description VARCHAR(1000) NOT NULL DEFAULT '',
+    prompt      MEDIUMTEXT    NOT NULL,
+    is_system   TINYINT(1)    NOT NULL DEFAULT 0,
+    created_at  DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at  DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uq_agents_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
