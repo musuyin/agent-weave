@@ -47,6 +47,13 @@ type BlockStopData struct {
 	Index   int64  `json:"index"`
 }
 
+// ThreadStatusData is the payload for EventThreadStatus.
+type ThreadStatusData struct {
+	ThreadID  string `json:"thread_id"`
+	Status    string `json:"status"`     // "running" | "done" | "error" | "cancelled"
+	AgentName string `json:"agent_name"`
+}
+
 // Hub manages the SSE channel for one active conversation.
 // Buffer size 256. Push uses drain-then-push to guarantee round_done/queue_drained delivery.
 type Hub struct {

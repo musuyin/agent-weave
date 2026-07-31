@@ -7,7 +7,7 @@ then summarises the results back to the user.
 Prerequisite: ph4a (agents/skills exist, `conversation_agents` populated,
 `messages.agent_id` column present).
 
-Status: **future** (not yet implemented).
+Status: **complete** (implemented in ph4b session).
 
 ---
 
@@ -54,7 +54,43 @@ current conversation.
 
 ---
 
-## Invariants (from the original doc, revived here)
+## Implementation notes (actual code)
+
+### Key design decisions made during implementation
+
+**Import cycle avoidance**: `tool/builtin/dispatch_to_agent.go` accepts callback
+types (`RunSubAgentFunc`, `AddDispatchFunc`, `ConvIDFromCtxFunc`) instead of
+importing the `agent` package. `agent.ProvideAgentService` wires the closures
+after constructing the `Service`, passing `svc.RunSubAgent` as the implementation.
+
+**DispatchRegistry flow**: `addDispatch(convID)` is called inside the tool handler
+(before the goroutine), and `reg.Done` is called from the `RunSubAgent` deferred
+cleanup. The `RunSubAgentFunc` callback is called from a goroutine already launched
+by the handler, so it does NOT use `go` again.
+
+**Fan-in location**: After `end_turn` in `run.go`, if `dispatchReg.Pending > 0`:
+wait → drain → persist synthetic `user` role message with results → `continue`.
+The orchestrator loop then gets a new LLM turn to summarise.
+
+**Dynamic system prompt**: `buildSystemPrompt(ctx, conversationID)` calls
+`agentSvc.ListConversationAgents`. When agents are present, appends:
+`## Available Subagents` section listing name, ID, description.
+
+### New/modified files
+
+| File | Change |
+|---|---|
+| `internal/agent/service.go` | Added `agentSvc`, `dispatchReg` fields; calls `builtin.RegisterDispatchTool` |
+| `internal/agent/run.go` | `ctx = withConversationID(ctx, conversationID)` at top; `buildSystemPrompt(ctx, convID)`; fan-in after `end_turn` |
+| `internal/agent/subagent.go` | `RunSubAgent` — single LLM turn, no tools, persists with `agentID` |
+| `internal/agent/dispatch.go` | `DispatchRegistry` (WaitGroup + result accumulator) |
+| `internal/agent/ctxkey.go` | `withConversationID` / `conversationIDFromCtx` |
+| `internal/tool/builtin/dispatch_to_agent.go` | `RegisterDispatchTool` with callback types |
+| `internal/service/thread.go` | `ThreadService.CancelAllThreads` (one tx per thread) |
+| `internal/handler/thread.go` | `DELETE /api/conversations/:id/threads` → 204 |
+| `internal/handler/router.go` | Added `threadH` parameter and route |
+| `cmd/server/wire.go` + `wire_gen.go` | Added `NewDispatchRegistry`, `NewThreadService`, `NewThreadHandler` |
+| `test/agent/dispatch_test.go` | Unit tests for `DispatchRegistry` |
 
 | # | Invariant |
 |---|---|

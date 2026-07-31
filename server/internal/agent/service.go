@@ -11,35 +11,68 @@ import (
 	"github/musuyin/agent-weave/internal/config"
 	"github/musuyin/agent-weave/internal/hook"
 	"github/musuyin/agent-weave/internal/mcp"
+	"github/musuyin/agent-weave/internal/model/repository"
+	svcpkg "github/musuyin/agent-weave/internal/service"
+	"github/musuyin/agent-weave/internal/tool/builtin"
 )
 
 // Service is the agent execution service. One instance per application.
 type Service struct {
-	db        *gorm.DB // kept for Phase 1+ db.Session(&gorm.Session{NewDB:true}) task graph queries
-	aiClient  *anthropic.Client
-	registry  *HubRegistry
-	chain     *hook.Chain
-	mcpRouter *mcp.Router
-	cfg       *config.Config
-	log       *slog.Logger
+	db          *gorm.DB
+	aiClient    *anthropic.Client
+	registry    *HubRegistry
+	chain       *hook.Chain
+	mcpRouter   *mcp.Router
+	cfg         *config.Config
+	log         *slog.Logger
+	agentSvc    *svcpkg.AgentService
+	dispatchReg *DispatchRegistry
 }
 
-// ProvideAgentService constructs the agent Service. Wire provider.
-func ProvideAgentService(db *gorm.DB, cfg *config.Config, registry *HubRegistry, chain *hook.Chain, mcpRouter *mcp.Router, log *slog.Logger) *Service {
+// ProvideAgentService constructs the agent Service and registers the dispatch_to_agent builtin tool.
+// Wire provider.
+func ProvideAgentService(
+	db *gorm.DB,
+	cfg *config.Config,
+	registry *HubRegistry,
+	chain *hook.Chain,
+	mcpRouter *mcp.Router,
+	log *slog.Logger,
+	agentSvc *svcpkg.AgentService,
+	dispatchReg *DispatchRegistry,
+) *Service {
 	opts := []option.RequestOption{option.WithAPIKey(cfg.LLMModel.Anthropic.APIKey)}
 	if cfg.LLMModel.Anthropic.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.LLMModel.Anthropic.BaseURL))
 	}
 	client := anthropic.NewClient(opts...)
-	return &Service{
-		db:        db,
-		aiClient:  &client,
-		registry:  registry,
-		chain:     chain,
-		mcpRouter: mcpRouter,
-		cfg:       cfg,
-		log:       log,
+	svc := &Service{
+		db:          db,
+		aiClient:    &client,
+		registry:    registry,
+		chain:       chain,
+		mcpRouter:   mcpRouter,
+		cfg:         cfg,
+		log:         log,
+		agentSvc:    agentSvc,
+		dispatchReg: dispatchReg,
 	}
+
+	// Register dispatch_to_agent after svc is constructed so the closure captures it.
+	// Note: RunSubAgentFunc is called from a goroutine already launched by the handler,
+	// so this closure must NOT use `go` again.
+	builtin.RegisterDispatchTool(
+		db,
+		agentSvc,
+		func(ctx context.Context, conversationID string, thread repository.Thread, instruction string) {
+			hub := svc.registry.GetOrCreate(conversationID)
+			svc.RunSubAgent(ctx, conversationID, thread, instruction, hub, svc.dispatchReg)
+		},
+		svc.dispatchReg.Add,
+		conversationIDFromCtx,
+	)
+
+	return svc
 }
 
 // Run executes one full agent turn for the given conversation.

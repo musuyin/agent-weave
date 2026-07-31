@@ -43,8 +43,15 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		cleanup()
 		return nil, nil, err
 	}
-	agentService := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log)
-	messageHandler := handler.NewMessageHandler(messageService, agentService, hubRegistry)
+	agentService, err := service.ProvideAgentService(ctx, gormDB)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	dispatchRegistry := agent.NewDispatchRegistry()
+	service2 := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log, agentService, dispatchRegistry)
+	messageHandler := handler.NewMessageHandler(messageService, service2, hubRegistry)
 	streamHandler := handler.NewStreamHandler(hubRegistry, messageService)
 	reportService, err := service.ProvideReportService(ctx, gormDB, conversationService)
 	if err != nil {
@@ -52,7 +59,7 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		cleanup()
 		return nil, nil, err
 	}
-	reportHandler := handler.NewReportHandler(reportService, messageService, agentService, hubRegistry)
+	reportHandler := handler.NewReportHandler(reportService, messageService, service2, hubRegistry)
 	skillService, err := service.ProvideSkillService(ctx, gormDB)
 	if err != nil {
 		cleanup2()
@@ -60,14 +67,10 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		return nil, nil, err
 	}
 	skillHandler := handler.NewSkillHandler(skillService)
-	serviceAgentService, err := service.ProvideAgentService(ctx, gormDB)
-	if err != nil {
-		cleanup2()
-		cleanup()
-		return nil, nil, err
-	}
-	agentHandler := handler.NewAgentHandler(serviceAgentService)
-	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, skillHandler, agentHandler, log)
+	agentHandler := handler.NewAgentHandler(agentService)
+	threadService := service.NewThreadService(gormDB)
+	threadHandler := handler.NewThreadHandler(threadService)
+	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, skillHandler, agentHandler, threadHandler, log)
 	return engine, func() {
 		cleanup2()
 		cleanup()

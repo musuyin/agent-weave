@@ -15,6 +15,7 @@ func ProvideRouter(
 	reportH *ReportHandler,
 	skillH *SkillHandler,
 	agentH *AgentHandler,
+	threadH *ThreadHandler,
 	log *slog.Logger,
 ) *gin.Engine {
 	r := gin.New()
@@ -33,6 +34,7 @@ func ProvideRouter(
 		api.GET("/conversations/:id/agents", agentH.ListConversationAgents)
 		api.POST("/conversations/:id/agents", agentH.AddConversationAgent)
 		api.DELETE("/conversations/:id/agents/:agentId", agentH.RemoveConversationAgent)
+		api.DELETE("/conversations/:id/threads", threadH.CancelAll)
 		api.POST("/reports/:type/run", reportH.Run)
 
 		api.GET("/skills", skillH.List)

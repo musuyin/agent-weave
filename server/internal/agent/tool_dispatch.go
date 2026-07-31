@@ -65,7 +65,7 @@ func (s *Service) dispatchToolsFromBlocks(ctx context.Context, conversationID st
 	}
 
 	// Persist assistant message ONCE before any hook fires (invariant A).
-	if err := s.persistMessage(ctx, conversationID, "assistant", assistantBlocks); err != nil {
+	if err := s.persistMessage(ctx, conversationID, "assistant", assistantBlocks, nil); err != nil {
 		return fmt.Errorf("persist assistant: %w", err)
 	}
 
@@ -118,7 +118,7 @@ func (s *Service) dispatchToolsFromBlocks(ctx context.Context, conversationID st
 
 	// Persist all tool results as a single user message (Anthropic API requirement).
 	if len(resultBlocks) > 0 {
-		if err := s.persistMessage(ctx, conversationID, "user", resultBlocks); err != nil {
+		if err := s.persistMessage(ctx, conversationID, "user", resultBlocks, nil); err != nil {
 			return fmt.Errorf("persist tool results: %w", err)
 		}
 	}

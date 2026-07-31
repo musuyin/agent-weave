@@ -49,11 +49,13 @@ func (s *Service) loadHistory(ctx context.Context, conversationID string) ([]ant
 }
 
 // persistMessage saves a message to DB with a generated UUID and current timestamp.
-func (s *Service) persistMessage(ctx context.Context, conversationID, role string, content repository.ContentBlocks) error {
+// agentID is nil for orchestrator messages, or a pointer to the agent's UUID for subagent messages.
+func (s *Service) persistMessage(ctx context.Context, conversationID, role string, content repository.ContentBlocks, agentID *string) error {
 	msg := repository.Message{
 		ID:             uuid.NewString(),
 		ConversationID: conversationID,
 		Role:           role,
+		AgentID:        agentID,
 		Content:        content,
 		CreatedAt:      time.Now().UTC(),
 	}
