@@ -9,6 +9,13 @@ import (
 	"github/musuyin/agent-weave/internal/model/repository"
 )
 
+// terminalStatuses lists thread states that must not be overwritten by CancelAllThreads.
+var terminalStatuses = []string{
+	string(repository.ThreadStatusDone),
+	string(repository.ThreadStatusCancelled),
+	string(repository.ThreadStatusError),
+}
+
 type ThreadService struct {
 	db *gorm.DB
 }
@@ -22,12 +29,7 @@ func NewThreadService(db *gorm.DB) *ThreadService {
 func (s *ThreadService) CancelAllThreads(ctx context.Context, convID string) error {
 	var threads []repository.Thread
 	if err := s.db.WithContext(ctx).
-		Where("conversation_id = ? AND status NOT IN ?", convID,
-			[]string{
-				string(repository.ThreadStatusDone),
-				string(repository.ThreadStatusCancelled),
-				string(repository.ThreadStatusError),
-			}).
+		Where("conversation_id = ? AND status NOT IN ?", convID, terminalStatuses).
 		Find(&threads).Error; err != nil {
 		return fmt.Errorf("cancel threads: list: %w", err)
 	}
@@ -36,12 +38,7 @@ func (s *ThreadService) CancelAllThreads(ctx context.Context, convID string) err
 		id := t.ID
 		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return tx.Model(&repository.Thread{}).
-				Where("id = ? AND status NOT IN ?", id,
-					[]string{
-						string(repository.ThreadStatusDone),
-						string(repository.ThreadStatusCancelled),
-						string(repository.ThreadStatusError),
-					}).
+				Where("id = ? AND status NOT IN ?", id, terminalStatuses).
 				Update("status", repository.ThreadStatusCancelled).Error
 		}); err != nil {
 			return fmt.Errorf("cancel thread %s: %w", id, err)

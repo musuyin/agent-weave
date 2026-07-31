@@ -34,9 +34,9 @@ func (s *Service) RunSubAgent(
 	var runErr error
 
 	defer func() {
-		status := "done"
+		status := repository.ThreadStatusDone
 		if runErr != nil {
-			status = "error"
+			status = repository.ThreadStatusError
 		}
 		// Short per-thread transaction (invariant C).
 		_ = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -46,7 +46,7 @@ func (s *Service) RunSubAgent(
 		})
 		hub.Push(SSEEvent{Type: EventThreadStatus, Data: ThreadStatusData{
 			ThreadID:  thread.ID,
-			Status:    status,
+			Status:    string(status),
 			AgentName: agentName,
 		}})
 		reg.Done(conversationID, SubAgentResult{
