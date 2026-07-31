@@ -1,150 +1,97 @@
-# ph7 — Context Compression + Long-term Memory (上下文压缩+长期记忆)
+# ph7 — Context Compaction (Memory Management)
 
-**Goal**: Handle long conversations without hitting token limits; persist learnings across sessions.
-**Prerequisite**: ph1 complete (agent loop). All other phases optional.
+**Goal**: Keep the active context window small as conversations grow, using a
+**pinned head + compacted middle + live tail** model.
 
----
-
-## 7.1 Context Compression (`internal/agent/compressor.go`)
-
-Triggered when the accumulated token count approaches the model's context limit.
-
-```go
-type Compressor struct {
-    aiClient *anthropic.Client
-    db       *gorm.DB
-    log      *slog.Logger
-}
-
-// MaybeCompress checks token usage and compresses if needed.
-// Called at step 6 of the agent loop (after each round).
-// Returns true if compression occurred.
-func (c *Compressor) MaybeCompress(ctx context.Context, convID string, messages []anthropic.MessageParam) ([]anthropic.MessageParam, bool, error)
-```
-
-Compression strategy:
-1. Count tokens in current message history (use `accMsg.Usage` from the API response)
-2. Threshold: compress when `input_tokens > model_context_limit * 0.8` (e.g. > 160K for 200K context)
-3. Identify a "safe tail" — keep the last N messages intact (default: last 20)
-4. Summarize the head (everything before the safe tail) via a separate Anthropic API call:
-   ```
-   System: "Summarize the following conversation history concisely, preserving key decisions, facts, and tool results."
-   ```
-5. Replace the head with a single synthetic `user` message: `"[Conversation summary: ...]"`
-6. Update the in-memory message slice (DB is NOT rewritten — compression is ephemeral per session)
-
-## 7.2 Long-term Memory (`internal/memory/`)
-
-Memory is stored as Markdown files in a per-user directory: `memory/{user_id}/`.
-
-### 7.2.1 MEMORY.md Index
-
-`memory/{user_id}/MEMORY.md` — index file, one line per memory entry:
-```
-- [Title](filename.md) — one-line description
-```
-
-Loaded in system prompt layer 5 each round:
-```go
-func LoadMemoryIndex(userID string) (string, error)
-    // returns contents of MEMORY.md, or empty string if absent
-```
-
-### 7.2.2 Memory Read Tool
-
-```go
-// read_memory tool: load a specific memory file by slug
-type ReadMemoryParams struct {
-    Name string `json:"name"`  // slug from MEMORY.md index
-}
-```
-
-### 7.2.3 Memory Write Tool
-
-```go
-// save_memory tool: create or update a memory file
-type SaveMemoryParams struct {
-    Name    string `json:"name"`     // kebab-case slug, also the filename
-    Title   string `json:"title"`
-    Content string `json:"content"`  // markdown body
-    Type    string `json:"type"`     // user | feedback | project | reference
-}
-```
-
-Handler:
-1. Write `memory/{user_id}/{name}.md` with frontmatter + content
-2. Upsert the entry in `MEMORY.md` index
-
-### 7.2.4 System Prompt Layer 5
-
-Dynamic layer rebuilt each round:
-```go
-func (s *Service) buildMemoryLayer(userID string) string {
-    index, _ := memory.LoadMemoryIndex(userID)
-    if index == "" {
-        return ""
-    }
-    return "## Long-term Memory Index\n\n" + index
-}
-```
-
-## 7.3 Agent Loop Update
-
-**Step 3** (rebuild dynamic prompt) gains layer 5:
-```go
-systemPrompt = buildStaticLayers() +
-    "\n---\n" +
-    buildMemoryLayer(userID) +         // layer 5 — new
-    buildDynamicContext(convID, db)    // layer 6
-```
-
-**Step 6** (compression — previously no-op):
-```go
-messages, compressed, err := compressor.MaybeCompress(ctx, convID, messages)
-if compressed {
-    slog.Info("context compressed", "conv_id", convID)
-}
-```
-
-## 7.4 Oncall Alert Fast-Analysis
-
-Pure prompt capability — no new tools needed.
-
-Add to system prompt layer 1 (orchestrator instructions):
-```
-When given an oncall alert or error log:
-1. Identify the service, error type, and timestamp
-2. Search relevant MCP sources (GitHub, Jira) for related recent changes
-3. Produce a structured triage: impact, likely cause, immediate mitigation steps
-```
-
-## 7.5 Files to Create/Modify
-
-**New:**
-- `internal/agent/compressor.go`
-- `internal/memory/memory.go` — index read/write
-- `internal/tool/builtin/read_memory.go`
-- `internal/tool/builtin/save_memory.go`
-
-**Modified:**
-- `internal/agent/loop.go` — add step 6 compression, layer 5 in prompt builder
-- `prompts/orchestrator.md` — add oncall triage instructions
+Status: **complete** (context compaction implemented; long-term memory deferred).
 
 ---
 
-## Verification
+## Implemented: Context Compaction
 
-```bash
-# 1. Context compression:
-# Send 100+ messages to accumulate tokens
-# After threshold: slog shows "context compressed"
-# Subsequent messages still work correctly
+### Strategy
 
-# 2. Memory write:
-# Agent calls save_memory → memory/{user_id}/test.md created
-# MEMORY.md updated with new entry
-# Next session: layer 5 includes the new entry
-
-# 3. Memory read:
-# Agent calls read_memory with slug → returns file content
 ```
+[first 4 messages  — pinned head, never dropped]
+[1 synthetic "summary" message — compacted middle]
+[last 10 messages  — live tail]
+```
+
+Triggered when `loadHistory` returns ≥ 40 non-compacted messages.
+
+### Flow
+
+```
+loadHistory()
+  └─ query DB: conversation_id = X AND compacted = false, ORDER BY created_at ASC, id ASC
+  └─ maybeCompact(msgs)
+       ├─ len(msgs) < 40 → return as-is
+       └─ len(msgs) >= 40:
+            head   = msgs[:4]
+            tail   = msgs[len-10:]
+            middle = msgs[4 : len-10]
+            compactMessages(middle, tail)
+              ├─ buildCompactionPrompt(middle, tail)   ← both slices sent to LLM
+              ├─ LLM call → summaryText
+              ├─ INSERT summary message (role=user, compacted=false, created_at = last_middle.created_at + 1ms)
+              └─ UPDATE messages SET compacted=1 WHERE id IN (middle IDs)
+            return [head... summary tail...]
+```
+
+### Compaction prompt technique
+
+The LLM receives **both** `OLD MESSAGES` (candidates for compression) **and**
+`RECENT MESSAGES` (the live tail, for context only). This lets the model drop
+content that has already been resolved or superseded — producing tighter summaries
+than sending only the old messages.
+
+The summary is prepended with `[Context summary]\n` so the agent loop can
+distinguish it from regular user messages.
+
+### DB change
+
+`messages.compacted TINYINT(1) DEFAULT 0`
+
+- `compacted = 1`: excluded from `loadHistory` forever
+- `compacted = 0`: included (both regular messages and the synthetic summary)
+- Migration: `db/migrations/000009_add_compacted_to_messages.up.sql`
+
+### Parameters (`internal/agent/compaction.go`)
+
+```go
+const (
+    CompactThreshold = 40  // trigger when non-compacted history >= this
+    PinnedHead       = 4   // messages always kept at the front
+    LiveTail         = 10  // messages always kept at the end
+)
+```
+
+### Non-fatal design
+
+If the compaction LLM call fails (network error, empty response, DB write failure),
+`loadHistory` logs a warning at `WARN` level and falls through with the original
+full history. The agent loop is **never blocked** by a compaction failure.
+
+### Files
+
+| File | Role |
+|---|---|
+| `db/migrations/000009_add_compacted_to_messages.up.sql` | Adds `compacted` column |
+| `internal/model/repository/message.go` | `Compacted bool` field on `Message` |
+| `internal/agent/compaction.go` | `maybeCompact`, `compactMessages`, `renderMessages`, constants |
+| `internal/agent/history.go` | `compacted = false` filter + `maybeCompact` call in `loadHistory` |
+| `test/agent/compaction_test.go` | Split invariants + DB filter tests |
+
+---
+
+## Deferred: Long-term Memory
+
+Memory tools (`save_memory`, `read_memory`) and `MEMORY.md` index injection into
+the system prompt (layer 5 of the six-layer prompt) are deferred — context
+compaction covers the primary token-cost concern for this learning project.
+
+When implemented, the design is:
+- `MEMORY.md` lives in the project root; each line is a one-line summary + file pointer
+- System prompt layer 5 injects the full `MEMORY.md` content each round (dynamic layer)
+- `save_memory` tool: append to `MEMORY.md` + write the memory file
+- `read_memory` tool: load a specific memory file by name (progressive disclosure)

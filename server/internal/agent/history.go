@@ -11,15 +11,24 @@ import (
 	"github/musuyin/agent-weave/internal/model/repository"
 )
 
-// loadHistory loads all messages for the conversation ordered (created_at ASC, id ASC)
-// and converts them to the Anthropic SDK message format, including tool_use and tool_result blocks.
+// loadHistory loads non-compacted messages for the conversation ordered
+// (created_at ASC, id ASC), runs compaction if the history is too long,
+// and converts the result to the Anthropic SDK message format.
 func (s *Service) loadHistory(ctx context.Context, conversationID string) ([]anthropic.MessageParam, error) {
 	var msgs []repository.Message
 	if err := s.db.WithContext(ctx).
-		Where("conversation_id = ?", conversationID).
+		Where("conversation_id = ? AND compacted = ?", conversationID, false).
 		Order("created_at ASC, id ASC").
 		Find(&msgs).Error; err != nil {
 		return nil, err
+	}
+
+	compacted, err := s.maybeCompact(ctx, conversationID, msgs)
+	if err != nil {
+		s.log.Warn("compaction failed, using full history", "conv_id", conversationID, "error", err)
+		// non-fatal: fall through with original msgs
+	} else {
+		msgs = compacted
 	}
 
 	params := make([]anthropic.MessageParam, 0, len(msgs))

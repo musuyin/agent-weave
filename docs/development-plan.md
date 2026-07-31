@@ -1,28 +1,27 @@
 # Agent Weave — Development Plan
 
-> Generated 2026-07-27. Full spec: `docs/项目重写说明.md`.
-> Current state: greenfield (zero Go source files, bare `go.mod`).
+> Full spec: `docs/项目重写说明.md`.
 
 ---
 
 ## Implementation Roadmap
 
 ```
-Phase 0  基础骨架
-Phase 1  工具+Hook
-Phase 2  MCP 接入
-Phase 3  手动报告
-Phase 4  多 Agent 平台
-Phase 5  文件操作+审批
-Phase 6  命令驱动可视化
-Phase 7  上下文压缩+长期记忆
+Phase 0  基础骨架          ✓ complete
+Phase 1  工具+Hook         ✓ complete
+Phase 2  MCP 接入          ✓ complete
+Phase 3  手动报告          ✓ complete
+Phase 4  多 Agent 平台     ✓ complete (ph4a + ph4b; ph4c frontend deferred)
+Phase 7  上下文压缩        ✓ complete (compaction; long-term memory deferred)
+Phase 5  文件操作+审批     deferred (see docs/deferred.md)
+Phase 6  命令驱动可视化    deferred (see docs/deferred.md)
 ```
 
 ---
 
 ## Phase 0 — Foundation (基础骨架)
 
-**Goal**: Runnable server — login, streaming text chat, persistent messages.
+**Goal**: Runnable server — streaming text chat, persistent messages.
 
 ---
 
@@ -34,77 +33,67 @@ Phase 7  上下文压缩+长期记忆
 2. **Hook chain**
    - `PRE_TOOL_USE`: sync, serial, can abort (return error) or mutate params
    - `POST_TOOL_USE`: async goroutine, deep-copy context, pure observer
-   - Chain order: `SecurityHook → ApprovalHook` (PRE), `AuditHook` (POST)
-3. **Basic built-in tools**: `read_file`, `list_directory`, `fetch_url`, `respond_to_user`
-4. **System prompt pipeline** — all 6 layers wired up
-   - Static: layers 1–4 built once at loop start
-   - Dynamic: layers 5–6 rebuilt each round (layer 6 queries DB with `NewDB: true` to bypass GORM identity map)
-5. **Tool result truncation** — 16 KB cap, UTF-8 safe (no mid-rune cut)
+   - Chain order: `SecurityHook` (PRE), `AuditHook` (POST)
+3. **Basic built-in tools**: `read_file`, `list_directory`, `fetch_url`
+4. **Tool result truncation** — 16 KB cap, UTF-8 safe
 
 ---
 
 ## Phase 2 — MCP (MCP 接入)
 
-1. **MCPClient interface** — 3 transports: stdio, SSE, HTTP
-2. **Tool routing table** — built at loop start, `toolName → MCPClient`
-3. **GitHub name-prefix deduplication** — `github-tools-sap__<tool>` / `github-wdf__<tool>`
-4. **`mcp_tokens` table** — DB-cached OAuth tokens, 30-s pre-expiry refresh
-   - Client Credentials: auto-refresh
-   - OIDC: return re-auth URL to user
-5. **Mount**: GitHub (×2) + Jira MCP servers
+1. **MCPClient interface** — HTTP Streamable transport (stdio/SSE deferred)
+2. **Tool routing** — `prefix__toolname` separator; `Route(name)` → `(Client, strippedName, ok)`
+3. **GitHub prefix deduplication** — `github-tools__<tool>` / `github-wdf__<tool>`
+4. **Static PAT auth** — `Authorization: Bearer <token>` in `config.yaml` headers (OAuth token refresh deferred)
+5. **Servers**: github-tools, github-wdf (+ Jira when network allows)
 
 ---
 
 ## Phase 3 — Manual Reports (手动报告)
 
 1. `POST /api/reports/:type/run` — triggers an on-demand report (`daily` | `weekly`)
-2. Handler creates/reuses a fixed conversation by well-known title, injects a fixed prompt, calls `agent.Service.Run`
-3. Agent uses GitHub MCP tools to fetch commits + PRs, filters bots, formats Markdown — streamed live over SSE
-4. No scheduler, no cron, no background jobs
+2. Fixed conversations by well-known title (`daily-report`, `weekly-report`), pre-created at startup
+3. Date-stamped prompts built at request time; agent uses GitHub MCP tools to fetch activity
+4. Streamed live over SSE; no scheduler, no cron
 
 ---
 
 ## Phase 4 — Multi-Agent Platform (多 Agent 平台)
 
-A conversation is a multi-agent chat: an implicit built-in orchestrator plus
-zero or more user-added subagents. The user talks only to the orchestrator,
-which splits the request and dispatches tasks to subagents present in the chat
-(1 → n → 1). Split into three sub-phases (see `docs/ph4-sub-agent-scheduling.md`):
+A conversation is a multi-agent chat: an implicit built-in orchestrator plus zero or more
+user-added subagents. The orchestrator splits requests and dispatches tasks (1 → n → 1).
 
-- **ph4a** — Agent & Skill hubs + schema redesign (`skills`, `agents`,
-  `agent_skills`, `conversation_agents`, `messages.agent_id`). CRUD APIs,
-  agent↔skill loadout, conversation↔agent membership, system-default seeding.
-  *(implemented)*
-- **ph4b** — `dispatch_to_agent` tool, subagent runner, errgroup fan-in,
-  summary injection, thread lifecycle (invariants B/C/D). *(future)*
-- **ph4c** — Vue pages for the skill/agent hubs and per-chat agent selection.
-  *(future)*
+### ph4a — Agent & Skill Hubs ✓
+- `skills`, `agents`, `agent_skills`, `conversation_agents` tables + migrations 000004–000008
+- `messages.agent_id` (nullable FK; NULL = orchestrator)
+- SkillService + AgentService with `is_system` guard + startup seeding
+- CRUD routes: `/api/skills`, `/api/agents`, `/api/agents/:id/skills`, `/api/conversations/:id/agents`
+- System defaults: `code-review-guidelines` + `go-style` skills; `code-reviewer` agent
 
----
+### ph4b — Dispatch + Fan-in ✓
+- `dispatch_to_agent` tool: creates Thread (status=running before goroutine, invariant B), launches `RunSubAgent`
+- `DispatchRegistry`: WaitGroup + result accumulator per conversation
+- Fan-in in `run.go`: after `end_turn`, if pending > 0 → Wait → Drain → persist synthetic user message → continue loop
+- Dynamic system prompt: `## Available Subagents` section lists agents in conversation
+- `DELETE /api/conversations/:id/threads` — cancel all non-terminal threads (one short tx each, invariant C)
+- Import cycle avoided via callback types (`RunSubAgentFunc`, `AddDispatchFunc`, `ConvIDFromCtxFunc`)
 
-## Phase 5 — File Ops + Approval (文件操作+审批)
-
-1. `create_file`, `edit_file` — handler-layer sandbox check (`filepath.Clean` + `filepath.Rel` against `sandbox/{conv_id}/`)
-2. `ApprovalHook` — DB-first (`pending→approved/rejected`), then signal channel; fail-closed on DB error
-3. Batch approval — ≥2 file writes in one round → single approval; context flag for subsequent pass-through
-4. `AuditHook` — log keys only, never values
-5. `message_appended` SSE for approval bubbles and diffs
+### ph4c — Agent Hub UI
+Frontend pages for skill/agent hubs and per-chat agent selection. Deferred to `web/` workspace.
 
 ---
 
-## Phase 6 — Visualization (命令驱动可视化)
+## Phase 7 — Context Compaction
 
-1. `deploy_app` tool — Docker SDK, 8-step deploy
-2. `/preview/:conv_id/:path` reverse proxy via `httputil.ReverseProxy`
-3. Frontend iframe with `?t=timestamp` cache-bust
+**Pinned head + compacted middle + live tail** strategy. Triggered at ≥ 40 non-compacted messages.
 
----
+- `messages.compacted` column (migration 000009); rows with `compacted=1` excluded from `loadHistory`
+- `maybeCompact` in `history.go`: slices msgs into head (4) + middle + tail (10), calls LLM to summarise middle
+- Summary persisted as a `role=user` message; middle rows batch-updated to `compacted=1`
+- Non-fatal: compaction failure falls through with full history (agent loop never blocked)
+- Constants exported: `CompactThreshold=40`, `PinnedHead=4`, `LiveTail=10`
 
-## Phase 7 — Context Compression + Long-term Memory
-
-1. Token-limit detection → summarize older messages via Anthropic API
-2. `MEMORY.md` index surfaced in system prompt layer 5
-3. Oncall alert fast-analysis (prompt only, no new tools)
+Long-term memory (`save_memory`/`read_memory`, MEMORY.md index) deferred.
 
 ---
 
@@ -113,10 +102,10 @@ which splits the request and dispatches tasks to subagents present in the chat
 | # | Invariant |
 |---|---|
 | A | `PRE_TOOL_USE hook` → `write message history` → `execute tool` (never reorder) |
-| B | Thread marked running **before** goroutine delay |
-| C | Thread cancellation uses per-thread short transactions |
-| D | Sub-agent message IDs are independent (never reuse user message ID) |
+| B | Thread marked running **before** goroutine launch |
+| C | Thread cancellation uses per-thread short transactions (never a shared long tx) |
+| D | Subagent message IDs are independent (never reuse user message ID) |
 | E | `round_done` / `queue_drained` are never dropped (drain queue, then push) |
-| F | Approval: write DB first, signal channel second |
-| G | Sandbox path validated at handler layer (not hook layer) |
+| F | Approval: write DB first, signal channel second *(ph5, when implemented)* |
+| G | Sandbox path validated at handler layer, not hook layer *(ph5, when implemented)* |
 | H | Audit log: keys only, never values |
