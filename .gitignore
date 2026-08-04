@@ -2,3 +2,7 @@
 .claude/
 server/config.yaml
 
+web/node_modules/
+web/dist/
+web/.npmrc
+web/pnpm.json
