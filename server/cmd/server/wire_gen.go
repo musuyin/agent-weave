@@ -15,6 +15,7 @@ import (
 	"github/musuyin/agent-weave/internal/handler"
 	"github/musuyin/agent-weave/internal/hook"
 	"github/musuyin/agent-weave/internal/mcp"
+	"github/musuyin/agent-weave/internal/sandbox"
 	"github/musuyin/agent-weave/internal/service"
 	"log/slog"
 )
@@ -50,11 +51,18 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		return nil, nil, err
 	}
 	dispatchRegistry := agent.NewDispatchRegistry()
-	service2 := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log, agentService, dispatchRegistry)
+	manager, cleanup3, err := sandbox.ProvideManager(ctx, configConfig, log)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	service2 := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log, agentService, dispatchRegistry, manager)
 	messageHandler := handler.NewMessageHandler(messageService, service2, hubRegistry)
 	streamHandler := handler.NewStreamHandler(hubRegistry, messageService)
 	reportService, err := service.ProvideReportService(ctx, gormDB, conversationService)
 	if err != nil {
+		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
@@ -62,6 +70,7 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 	reportHandler := handler.NewReportHandler(reportService, messageService, service2, hubRegistry)
 	skillService, err := service.ProvideSkillService(ctx, gormDB)
 	if err != nil {
+		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
@@ -72,6 +81,7 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 	threadHandler := handler.NewThreadHandler(threadService)
 	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, skillHandler, agentHandler, threadHandler, log)
 	return engine, func() {
+		cleanup3()
 		cleanup2()
 		cleanup()
 	}, nil

@@ -12,6 +12,7 @@ import (
 	"github/musuyin/agent-weave/internal/hook"
 	"github/musuyin/agent-weave/internal/mcp"
 	"github/musuyin/agent-weave/internal/model/repository"
+	"github/musuyin/agent-weave/internal/sandbox"
 	svcpkg "github/musuyin/agent-weave/internal/service"
 	"github/musuyin/agent-weave/internal/tool/builtin"
 )
@@ -29,7 +30,7 @@ type Service struct {
 	dispatchReg *DispatchRegistry
 }
 
-// ProvideAgentService constructs the agent Service and registers the dispatch_to_agent builtin tool.
+// ProvideAgentService constructs the agent Service and registers builtin tools.
 // Wire provider.
 func ProvideAgentService(
 	db *gorm.DB,
@@ -40,6 +41,7 @@ func ProvideAgentService(
 	log *slog.Logger,
 	agentSvc *svcpkg.AgentService,
 	dispatchReg *DispatchRegistry,
+	sandboxMgr *sandbox.Manager,
 ) *Service {
 	opts := []option.RequestOption{option.WithAPIKey(cfg.LLMModel.Anthropic.APIKey)}
 	if cfg.LLMModel.Anthropic.BaseURL != "" {
@@ -71,6 +73,10 @@ func ProvideAgentService(
 		svc.dispatchReg.Add,
 		conversationIDFromCtx,
 	)
+
+	// Register sandbox tools (read_file, list_directory, write_file, run_command).
+	// Overwrites the placeholder stubs that were previously registered via init().
+	sandboxMgr.RegisterTools(conversationIDFromCtx)
 
 	return svc
 }

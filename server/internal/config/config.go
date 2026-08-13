@@ -13,6 +13,12 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	OIDC     OIDCConfig     `yaml:"oidc"`
 	MCP      MCPConfig      `yaml:"mcp"`
+	Sandbox  SandboxConfig  `yaml:"sandbox"`
+}
+
+type SandboxConfig struct {
+	Image        string `yaml:"image"`
+	WorkspaceDir string `yaml:"workspace_dir"`
 }
 
 type MCPConfig struct {
@@ -71,6 +77,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Server.Port == "" {
 		cfg.Server.Port = "8080"
+	}
+	if cfg.Sandbox.Image == "" {
+		cfg.Sandbox.Image = "ubuntu:24.04"
+	}
+	if cfg.Sandbox.WorkspaceDir == "" {
+		cfg.Sandbox.WorkspaceDir = "./sandbox"
 	}
 
 	return &cfg, nil

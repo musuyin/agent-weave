@@ -13,6 +13,7 @@ Phase 2  MCP 接入          ✓ complete
 Phase 3  手动报告          ✓ complete
 Phase 4  多 Agent 平台     ✓ complete (ph4a + ph4b; ph4c frontend deferred)
 Phase 7  上下文压缩        ✓ complete (compaction; long-term memory deferred)
+Phase 8  Docker 沙箱       ✓ complete (per-conversation containers; read_file, list_directory, write_file, run_command)
 Phase 5  文件操作+审批     deferred (see docs/deferred.md)
 Phase 6  命令驱动可视化    deferred (see docs/deferred.md)
 ```
@@ -97,6 +98,22 @@ Long-term memory (`save_memory`/`read_memory`, MEMORY.md index) deferred.
 
 ---
 
+## Phase 8 — Docker Sandbox
+
+**Goal**: OS-level isolation for agent file and command operations via per-conversation Docker containers.
+
+- `internal/sandbox/` package: `Manager` (lifecycle + tool registration), `Container` (exec/read/write/list), `ProvideManager` (Wire provider)
+- Four tools backed by sandbox: `read_file`, `list_directory`, `write_file`, `run_command`
+- Container: `ubuntu:24.04`, `sleep infinity`, workspace mounted at `/workspace`, 256 MB memory cap, `AutoRemove: true`
+- Host workspace at `{cfg.Sandbox.WorkspaceDir}/{convID}/` — files persist after container removal
+- `Manager.RegisterTools(convIDFromCtx)` called from `agent.ProvideAgentService`; overwrites empty stubs
+- Image pulled in background goroutine at startup (non-fatal if already present)
+- `Manager.Close()` stops all containers via Wire cleanup func
+
+Config keys: `sandbox.image` (default `ubuntu:24.04`), `sandbox.workspace_dir` (default `./sandbox`)
+
+---
+
 ## Key Architecture Invariants (never break)
 
 | # | Invariant |
@@ -109,3 +126,6 @@ Long-term memory (`save_memory`/`read_memory`, MEMORY.md index) deferred.
 | F | Approval: write DB first, signal channel second *(ph5, when implemented)* |
 | G | Sandbox path validated at handler layer, not hook layer *(ph5, when implemented)* |
 | H | Audit log: keys only, never values |
+| I | Sandbox paths validated before every Docker call — no traversal possible |
+| J | Container created once per conversation; never recreated during its lifetime |
+| K | Tool results from sandbox tools capped at 16 KB via `tool.Truncate` |

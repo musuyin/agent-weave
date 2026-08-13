@@ -159,6 +159,7 @@ docs/                  Spec and per-phase implementation plans
 | 4a | Skill + Agent hubs (CRUD + seeding) | Done |
 | 4b | Orchestrator dispatch + subagent fan-in | Done |
 | 7 | Context compaction | Done |
+| 8 | Docker sandbox (read_file, list_directory, write_file, run_command) | Done |
 | 4c | Agent Hub UI (frontend pages) | Deferred |
 | 5 | File operations + approval workflow | Deferred |
 | 6 | Command-driven Docker visualisation | Deferred |
