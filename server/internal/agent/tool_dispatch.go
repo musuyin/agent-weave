@@ -71,8 +71,11 @@ func (s *Service) dispatchToolsFromBlocks(ctx context.Context, conversationID st
 
 	var resultBlocks repository.ContentBlocks
 
+	// Inject round approval state so ApprovalHook can batch subsequent high-risk calls.
+	ctx = hook.WithRoundApproval(ctx)
+
 	for _, pt := range pending {
-		params := hook.ToolCallParams{Name: pt.name, Params: pt.input}
+		params := hook.ToolCallParams{Name: pt.name, Params: pt.input, BlockID: pt.id}
 
 		// Invariant A: FirePre AFTER history write, BEFORE execution.
 		preErr := s.chain.FirePre(ctx, &params)

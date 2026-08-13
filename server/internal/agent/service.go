@@ -42,6 +42,8 @@ func ProvideAgentService(
 	agentSvc *svcpkg.AgentService,
 	dispatchReg *DispatchRegistry,
 	sandboxMgr *sandbox.Manager,
+	approvalHook *hook.ApprovalHook,
+	auditHook *hook.AuditHook,
 ) *Service {
 	opts := []option.RequestOption{option.WithAPIKey(cfg.LLMModel.Anthropic.APIKey)}
 	if cfg.LLMModel.Anthropic.BaseURL != "" {
@@ -74,9 +76,21 @@ func ProvideAgentService(
 		conversationIDFromCtx,
 	)
 
-	// Register sandbox tools (read_file, list_directory, write_file, run_command).
+	// Register sandbox tools (read_file, list_directory, write_file, run_command, edit_file).
 	// Overwrites the placeholder stubs that were previously registered via init().
 	sandboxMgr.RegisterTools(conversationIDFromCtx)
+
+	// Wire approval and audit hooks with context extractors and push functions.
+	// Must happen after svc is constructed so closures can capture svc.registry.
+	approvalHook.Configure(
+		func(convID, eventType string, data any) {
+			hub := svc.registry.GetOrCreate(convID)
+			hub.Push(SSEEvent{Type: EventType(eventType), Data: data})
+		},
+		conversationIDFromCtx,
+		string(EventApprovalReq),
+	)
+	auditHook.Configure(conversationIDFromCtx)
 
 	return svc
 }

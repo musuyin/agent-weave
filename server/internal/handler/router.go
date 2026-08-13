@@ -16,6 +16,7 @@ func ProvideRouter(
 	skillH *SkillHandler,
 	agentH *AgentHandler,
 	threadH *ThreadHandler,
+	approvalH *ApprovalHandler,
 	log *slog.Logger,
 ) *gin.Engine {
 	r := gin.New()
@@ -35,6 +36,7 @@ func ProvideRouter(
 		api.POST("/conversations/:id/agents", agentH.AddConversationAgent)
 		api.DELETE("/conversations/:id/agents/:agentId", agentH.RemoveConversationAgent)
 		api.DELETE("/conversations/:id/threads", threadH.CancelAll)
+		api.POST("/conversations/:id/approvals/:block_id", approvalH.Decide)
 		api.POST("/reports/:type/run", reportH.Run)
 
 		api.GET("/skills", skillH.List)

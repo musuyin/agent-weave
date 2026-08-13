@@ -49,7 +49,7 @@ func TestAuditHook_KeysOnly(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	h := hook.NewAuditHook(log)
+	h := hook.NewAuditHook(log, nil)
 	params := hook.ToolCallParams{
 		Name:   "fetch_url",
 		Params: json.RawMessage(`{"url":"https://secret.internal/token?key=abc123"}`),
@@ -68,7 +68,7 @@ func TestAuditHook_LogsFailure(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	h := hook.NewAuditHook(log)
+	h := hook.NewAuditHook(log, nil)
 	params := hook.ToolCallParams{Name: "fetch_url", Params: json.RawMessage(`{"url":"x"}`)}
 	h.RunPost(context.Background(), params, "", &hook.ErrToolDenied{Name: "fetch_url"})
 

@@ -57,7 +57,7 @@ func (c *Container) WriteFile(ctx context.Context, path, content string) error {
 	filename := filepath.Base(cleanPath)
 
 	// Ensure parent directory exists.
-	if _, err := c.exec(ctx, []string{"mkdir", "-p", dir}); err != nil {
+	if _, err := c.execRaw(ctx, []string{"mkdir", "-p", dir}); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 
@@ -79,13 +79,45 @@ func (c *Container) WriteFile(ctx context.Context, path, content string) error {
 	return c.mgr.docker.CopyToContainer(ctx, c.id, dir, buf, dockercontainer.CopyToContainerOptions{})
 }
 
+// EditFile replaces the first occurrence of oldStr with newStr in the file at path.
+// Reads the full file without truncation so large files are handled correctly.
+func (c *Container) EditFile(ctx context.Context, path, oldStr, newStr string) (string, error) {
+	_, err := validatePath(path)
+	if err != nil {
+		return "error: " + err.Error(), nil
+	}
+	resolved := filepath.Join("/workspace", filepath.Clean(path))
+
+	content, err := c.execRaw(ctx, []string{"cat", resolved})
+	if err != nil {
+		return "error reading file: " + err.Error(), nil
+	}
+	if !strings.Contains(content, oldStr) {
+		return fmt.Sprintf("error: old_str not found in %s", path), nil
+	}
+	newContent := strings.Replace(content, oldStr, newStr, 1)
+	if err := c.WriteFile(ctx, path, newContent); err != nil {
+		return "error writing file: " + err.Error(), nil
+	}
+	return "ok: edited " + path, nil
+}
+
 // Exec runs command (passed to sh -c) inside the container and returns combined stdout+stderr.
 func (c *Container) Exec(ctx context.Context, command string) (string, error) {
 	return c.exec(ctx, []string{"sh", "-c", command})
 }
 
-// exec is the low-level Docker exec helper.
+// exec runs a command and returns output truncated to MaxToolResultBytes.
 func (c *Container) exec(ctx context.Context, cmd []string) (string, error) {
+	s, err := c.execRaw(ctx, cmd)
+	if err != nil {
+		return "", err
+	}
+	return tool.Truncate(s, tool.MaxToolResultBytes), nil
+}
+
+// execRaw is the low-level Docker exec helper. Returns full combined output without truncation.
+func (c *Container) execRaw(ctx context.Context, cmd []string) (string, error) {
 	execResp, err := c.mgr.docker.ContainerExecCreate(ctx, c.id, dockercontainer.ExecOptions{
 		AttachStdout: true,
 		AttachStderr: true,
@@ -106,14 +138,13 @@ func (c *Container) exec(ctx context.Context, cmd []string) (string, error) {
 		return "", fmt.Errorf("exec read: %w", err)
 	}
 
-	return tool.Truncate(buf.String(), tool.MaxToolResultBytes), nil
+	return buf.String(), nil
 }
 
 // validatePath ensures path stays within /workspace after cleaning.
 // Returns the absolute in-container path.
 func validatePath(path string) (string, error) {
 	resolved := filepath.Join("/workspace", filepath.Clean(path))
-	// After joining, resolved must be /workspace or /workspace/...
 	if resolved != "/workspace" && !strings.HasPrefix(resolved, "/workspace/") {
 		return "", errors.New("path escapes sandbox")
 	}

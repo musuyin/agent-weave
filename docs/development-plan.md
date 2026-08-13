@@ -14,7 +14,7 @@ Phase 3  手动报告          ✓ complete
 Phase 4  多 Agent 平台     ✓ complete (ph4a + ph4b; ph4c frontend deferred)
 Phase 7  上下文压缩        ✓ complete (compaction; long-term memory deferred)
 Phase 8  Docker 沙箱       ✓ complete (per-conversation containers; read_file, list_directory, write_file, run_command)
-Phase 5  文件操作+审批     deferred (see docs/deferred.md)
+Phase 5  文件操作+审批     ✓ complete (ApprovalHook, edit_file, audit_logs — see docs/ph5-file-operations-approval.md)
 Phase 6  命令驱动可视化    deferred (see docs/deferred.md)
 ```
 
@@ -98,6 +98,20 @@ Long-term memory (`save_memory`/`read_memory`, MEMORY.md index) deferred.
 
 ---
 
+## Phase 5 — File Operations + Approval (文件操作+审批)
+
+**Goal**: Gate high-risk tool calls behind explicit user approval; log all tool calls to the DB.
+
+- `ApprovalHook` (`internal/hook/approval_hook.go`): PRE_TOOL_USE, fail-closed DB record, SSE push, 120 s timeout
+- Decision endpoint: `POST /api/conversations/:id/approvals/:block_id` — DB write first, signal second (invariant F)
+- Batch approval: `RoundApprovalState` injected into context before the dispatch loop; subsequent tools skip re-prompting
+- High-risk tools: `write_file`, `edit_file`, `run_command`
+- `edit_file` tool: read full file → replace first occurrence → write back (uses `execRaw` to avoid truncation)
+- `AuditHook` enhanced: writes `audit_logs` rows with keys-only params (invariant H)
+- Migrations: `000010_create_approvals`, `000011_create_audit_logs`
+
+---
+
 ## Phase 8 — Docker Sandbox
 
 **Goal**: OS-level isolation for agent file and command operations via per-conversation Docker containers.
@@ -123,8 +137,8 @@ Config keys: `sandbox.image` (default `ubuntu:24.04`), `sandbox.workspace_dir` (
 | C | Thread cancellation uses per-thread short transactions (never a shared long tx) |
 | D | Subagent message IDs are independent (never reuse user message ID) |
 | E | `round_done` / `queue_drained` are never dropped (drain queue, then push) |
-| F | Approval: write DB first, signal channel second *(ph5, when implemented)* |
-| G | Sandbox path validated at handler layer, not hook layer *(ph5, when implemented)* |
+| F | Approval: write DB first, signal channel second |
+| G | Sandbox path validated at handler layer, not hook layer |
 | H | Audit log: keys only, never values |
 | I | Sandbox paths validated before every Docker call — no traversal possible |
 | J | Container created once per conversation; never recreated during its lifetime |

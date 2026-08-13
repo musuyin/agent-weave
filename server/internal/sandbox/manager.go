@@ -190,9 +190,40 @@ func (m *Manager) RegisterTools(convIDFromCtx func(context.Context) (string, boo
 			return c.Exec(ctx, p.Command)
 		},
 	})
+	tool.Register(tool.ToolDef{
+		Name:        "edit_file",
+		Description: "Replace the first occurrence of old_str with new_str in a file inside the conversation sandbox. The file must already exist. Path is relative to /workspace.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string", "description": "File path relative to /workspace."},
+				"old_str": map[string]any{"type": "string", "description": "Exact text to find and replace (first occurrence only)."},
+				"new_str": map[string]any{"type": "string", "description": "Replacement text."},
+			},
+			"required": []string{"path", "old_str", "new_str"},
+		},
+		Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+			var p struct {
+				Path   string `json:"path"`
+				OldStr string `json:"old_str"`
+				NewStr string `json:"new_str"`
+			}
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return "error: bad params", nil
+			}
+			convID, ok := convIDFromCtx(ctx)
+			if !ok {
+				return "error: no conversation context", nil
+			}
+			c, err := m.Ensure(ctx, convID)
+			if err != nil {
+				return "error: " + err.Error(), nil
+			}
+			return c.EditFile(ctx, p.Path, p.OldStr, p.NewStr)
+		},
+	})
 }
 
-// Close stops all running sandbox containers.
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

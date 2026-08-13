@@ -37,8 +37,9 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 	messageService := service.NewMessageService(gormDB)
 	hubRegistry := agent.NewHubRegistry(log)
 	securityHook := hook.ProvideSecurityHook()
-	auditHook := hook.NewAuditHook(log)
-	chain := hook.ProvideHookChain(securityHook, auditHook)
+	auditHook := hook.NewAuditHook(log, gormDB)
+	approvalHook := hook.NewApprovalHook(gormDB)
+	chain := hook.ProvideHookChain(securityHook, auditHook, approvalHook)
 	router, cleanup2, err := mcp.ProvideMCPRouter(ctx, configConfig, log)
 	if err != nil {
 		cleanup()
@@ -57,7 +58,7 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 		cleanup()
 		return nil, nil, err
 	}
-	service2 := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log, agentService, dispatchRegistry, manager)
+	service2 := agent.ProvideAgentService(gormDB, configConfig, hubRegistry, chain, router, log, agentService, dispatchRegistry, manager, approvalHook, auditHook)
 	messageHandler := handler.NewMessageHandler(messageService, service2, hubRegistry)
 	streamHandler := handler.NewStreamHandler(hubRegistry, messageService)
 	reportService, err := service.ProvideReportService(ctx, gormDB, conversationService)
@@ -79,7 +80,8 @@ func InitializeApp(ctx context.Context, log *slog.Logger) (*gin.Engine, func(), 
 	agentHandler := handler.NewAgentHandler(agentService)
 	threadService := service.NewThreadService(gormDB)
 	threadHandler := handler.NewThreadHandler(threadService)
-	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, skillHandler, agentHandler, threadHandler, log)
+	approvalHandler := handler.NewApprovalHandler(gormDB, approvalHook)
+	engine := handler.ProvideRouter(conversationHandler, messageHandler, streamHandler, reportHandler, skillHandler, agentHandler, threadHandler, approvalHandler, log)
 	return engine, func() {
 		cleanup3()
 		cleanup2()

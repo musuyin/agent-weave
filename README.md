@@ -11,6 +11,9 @@ Built as a learning/portfolio project demonstrating production-grade agentic pat
 - **Streaming chat** — Server-Sent Events deliver each token as it arrives; the agent loop runs detached from the HTTP connection so it completes even if the client drops
 - **Multi-agent dispatch** — The orchestrator has a built-in `dispatch_to_agent` tool that fans tasks to named subagents concurrently and fans the results back in
 - **Hook system** — Every tool call passes through a `PRE_TOOL_USE` chain (sync, serial, can abort) then a `POST_TOOL_USE` chain (async, observer-only)
+- **Docker sandbox** — Each conversation gets an isolated Docker container; `read_file`, `list_directory`, `write_file`, `edit_file`, and `run_command` all execute inside it
+- **Approval workflow** — High-risk tools (`write_file`, `edit_file`, `run_command`) block until the user approves or rejects via a dedicated endpoint; decisions are DB-persisted and batch-grouped per round
+- **Audit log** — Every tool call writes a structured row to `audit_logs` (param keys only, never values)
 - **MCP tool routing** — Connect any MCP server (e.g. GitHub); tools are merged into the LLM's tool list at startup and dispatched automatically
 - **Context compaction** — At ≥40 messages the middle slice is summarised by a dedicated LLM call and compacted in the database, keeping context windows manageable
 - **On-demand reports** — `POST /api/reports/daily/run` and `POST /api/reports/weekly/run` trigger GitHub activity reports streamed back over SSE
@@ -41,7 +44,7 @@ web/  (Vue 3)        →  REST + SSE  →  server/  (Go)  →  Claude API
 | Go version | 1.25 |
 | HTTP | Gin |
 | ORM | GORM (MySQL prod / SQLite in tests) |
-| DB migrations | golang-migrate (9 migration files, applied at startup) |
+| DB migrations | golang-migrate (11 migration files, applied at startup) |
 | DI | google/wire (compile-time, `wire_gen.go` committed) |
 | LLM | Anthropic SDK for Go (Claude) |
 | MCP client | modelcontextprotocol/go-sdk (Streamable HTTP) |
@@ -110,6 +113,7 @@ pnpm test     # Vitest
 | GET / POST | `/api/conversations` | List / create conversations |
 | GET / POST | `/api/conversations/:id/messages` | List messages / send a message (triggers agent loop) |
 | GET | `/api/conversations/:id/stream` | SSE stream for agent output |
+| POST | `/api/conversations/:id/approvals/:block_id` | Approve or reject a pending tool call |
 | POST | `/api/reports/:type/run` | Trigger on-demand report (`daily` or `weekly`) |
 | GET / POST | `/api/skills` | Skill CRUD |
 | GET / POST | `/api/agents` | Agent CRUD |
@@ -125,13 +129,14 @@ server/
   cmd/server/          Entry point, Wire provider graph
   internal/
     agent/             SSE hub, agent loop, compaction, subagent runner, dispatch registry
-    handler/           Thin HTTP adapters
-    hook/              Pre/post tool-use hook chains
+    handler/           Thin HTTP adapters (conversations, messages, approvals, skills, agents)
+    hook/              Pre/post tool-use hook chains (SecurityHook, ApprovalHook, AuditHook)
     mcp/               MCP client — flat toolName→client dispatch table
-    model/             GORM models (Conversation, Message, Thread)
+    model/             GORM models (Conversation, Message, Thread, Approval, AuditLog)
+    sandbox/           Docker sandbox — per-conversation containers, tool registration
     seeding/           Embedded orchestrator prompt, skill markdown, agent YAML
     service/           Business logic
-    tool/              Builtin tool registry (read_file, list_directory, fetch_url, dispatch_to_agent)
+    tool/              Builtin tool registry (fetch_url, dispatch_to_agent; file tools via sandbox)
   test/                Integration tests against SQLite in-memory
 
 web/
@@ -158,11 +163,11 @@ docs/                  Spec and per-phase implementation plans
 | 3 | On-demand daily/weekly reports | Done |
 | 4a | Skill + Agent hubs (CRUD + seeding) | Done |
 | 4b | Orchestrator dispatch + subagent fan-in | Done |
+| 4c | Agent Hub UI (frontend pages) | Done |
+| 5 | File operations + approval workflow (edit_file, ApprovalHook, audit_logs) | Done |
+| 6 | Command-driven Docker visualisation | Deferred |
 | 7 | Context compaction | Done |
 | 8 | Docker sandbox (read_file, list_directory, write_file, run_command) | Done |
-| 4c | Agent Hub UI (frontend pages) | Deferred |
-| 5 | File operations + approval workflow | Deferred |
-| 6 | Command-driven Docker visualisation | Deferred |
 
 ---
 
